@@ -1,0 +1,146 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import type { Session } from '@supabase/supabase-js';
+import type { Profile } from '@/types/models';
+import * as authService from '@/services/auth';
+import { supabase } from '@/services/supabase';
+
+interface AuthState {
+  session: Session | null;
+  profile: Profile | null;
+  loading: boolean;
+  error: string | null;
+
+  initialize: () => Promise<void>;
+  setSession: (session: Session | null) => void;
+  setProfile: (profile: Profile | null) => void;
+  loadProfile: () => Promise<void>;
+  signIn: (email: string, password: string) => Promise<boolean>;
+  signUp: (email: string, password: string, displayName: string) => Promise<boolean>;
+  updateProfile: (
+    updates: Partial<
+      Pick<Profile, 'display_name' | 'nickname' | 'initials' | 'avatar_url' | 'phone' | 'default_sharing_mode'>
+    >,
+  ) => Promise<boolean>;
+  signOut: () => Promise<void>;
+  clearError: () => void;
+  /** Convenience — avoids null-chaining everywhere */
+  user: { id: string; email?: string } | null;
+}
+
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set, get) => ({
+      session: null,
+      profile: null,
+      loading: false,
+      error: null,
+      user: null,
+
+      initialize: async () => {
+        set({ loading: true });
+        const { data } = await supabase.auth.getSession();
+        const session = data.session;
+        const user = session?.user ? { id: session.user.id, email: session.user.email } : null;
+        set({ session, user, loading: false });
+        if (session?.user?.id) {
+          await authService.markOnline(session.user.id);
+          await get().loadProfile();
+        }
+
+        supabase.auth.onAuthStateChange(async (_event, newSession) => {
+          const newUser = newSession?.user
+            ? { id: newSession.user.id, email: newSession.user.email }
+            : null;
+          set({ session: newSession, user: newUser });
+          if (newSession?.user?.id) {
+            await authService.markOnline(newSession.user.id);
+            await get().loadProfile();
+          } else {
+            set({ profile: null });
+          }
+        });
+      },
+
+      setSession: (session) => {
+        const user = session?.user ? { id: session.user.id, email: session.user.email } : null;
+        set({ session, user });
+      },
+
+      setProfile: (profile) => set({ profile }),
+
+      loadProfile: async () => {
+        const { session } = get();
+        if (!session?.user?.id) return;
+        const profile = await authService.getProfile(session.user.id);
+        if (profile) set({ profile });
+      },
+
+      signIn: async (email, password) => {
+        set({ loading: true, error: null });
+        const result = await authService.signIn(email, password);
+        if (!result.success) {
+          set({ loading: false, error: result.error ?? 'Sign in failed' });
+          return false;
+        }
+        const { data } = await supabase.auth.getSession();
+        const user = data.session?.user
+          ? { id: data.session.user.id, email: data.session.user.email }
+          : null;
+        set({ session: data.session, user, loading: false });
+        if (data.session?.user?.id) {
+          await authService.markOnline(data.session.user.id);
+          await get().loadProfile();
+        }
+        return true;
+      },
+
+      signUp: async (email, password, displayName) => {
+        set({ loading: true, error: null });
+        const result = await authService.signUp(email, password, displayName);
+        if (!result.success) {
+          set({ loading: false, error: result.error ?? 'Sign up failed' });
+          return false;
+        }
+        const { data } = await supabase.auth.getSession();
+        const user = data.session?.user
+          ? { id: data.session.user.id, email: data.session.user.email }
+          : null;
+        set({ session: data.session, user, loading: false });
+        if (data.session?.user?.id) {
+          await authService.markOnline(data.session.user.id);
+          await get().loadProfile();
+        }
+        return true;
+      },
+
+      updateProfile: async (updates) => {
+        const { session, profile } = get();
+        if (!session?.user?.id) return false;
+        set({ loading: true });
+        const result = await authService.updateProfile(session.user.id, updates);
+        if (result.success && profile) {
+          set({ profile: { ...profile, ...updates }, loading: false });
+        } else {
+          set({ loading: false, error: result.error ?? 'Update failed' });
+        }
+        return result.success;
+      },
+
+      signOut: async () => {
+        const userId = get().session?.user?.id;
+        if (userId) await authService.markOffline(userId).catch(() => {});
+        await authService.signOut();
+        set({ session: null, profile: null, user: null, error: null });
+      },
+
+      clearError: () => set({ error: null }),
+    }),
+    {
+      name: 'auth-store',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => ({ session: state.session, profile: state.profile }),
+    },
+  ),
+);

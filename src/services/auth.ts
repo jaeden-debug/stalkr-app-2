@@ -1,0 +1,92 @@
+import { supabase } from './supabase';
+import type { Profile } from '@/types/models';
+
+export interface AuthResult {
+  success: boolean;
+  error?: string;
+}
+
+export async function signUp(
+  email: string,
+  password: string,
+  displayName: string,
+): Promise<AuthResult> {
+  const { error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: { display_name: displayName },
+    },
+  });
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+export async function signIn(email: string, password: string): Promise<AuthResult> {
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+export async function signOut(): Promise<void> {
+  await supabase.auth.signOut();
+}
+
+export async function getSession() {
+  const { data } = await supabase.auth.getSession();
+  return data.session;
+}
+
+export async function getProfile(userId: string): Promise<Profile | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
+  if (error || !data) return null;
+  return data as Profile;
+}
+
+export async function updateProfile(
+  userId: string,
+  updates: Partial<Pick<Profile, 'display_name' | 'nickname' | 'initials' | 'avatar_url' | 'phone' | 'default_sharing_mode'>>,
+): Promise<AuthResult> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', userId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+export async function uploadAvatar(userId: string, uri: string): Promise<string | null> {
+  try {
+    const ext = uri.split('.').pop() ?? 'jpg';
+    const path = `avatars/${userId}.${ext}`;
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const { error } = await supabase.storage.from('avatars').upload(path, blob, {
+      upsert: true,
+      contentType: `image/${ext}`,
+    });
+    if (error) return null;
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    return data.publicUrl;
+  } catch {
+    return null;
+  }
+}
+
+export async function markOnline(userId: string): Promise<void> {
+  await supabase
+    .from('profiles')
+    .update({ is_online: true, last_seen_at: new Date().toISOString() })
+    .eq('id', userId);
+}
+
+export async function markOffline(userId: string): Promise<void> {
+  await supabase
+    .from('profiles')
+    .update({ is_online: false, last_seen_at: new Date().toISOString() })
+    .eq('id', userId);
+}
