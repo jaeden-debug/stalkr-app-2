@@ -105,10 +105,11 @@ export async function fetchGroupMembers(groupId: string): Promise<GroupMember[]>
       row.profile?.nickname ||
       row.profile?.display_name ||
       'Unknown';
+    const resolvedName: string = member.displayName ?? 'Unknown';
     member.displayInitials =
       row.initials_override ||
       row.profile?.initials ||
-      (member.displayName[0] ?? '?').toUpperCase();
+      (resolvedName[0] ?? '?').toUpperCase();
     member.displayAvatar = row.avatar_url_override || row.profile?.avatar_url || null;
     return member;
   });

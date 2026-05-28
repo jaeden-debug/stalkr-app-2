@@ -26,6 +26,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     bundleIdentifier: BUNDLE_ID,
     buildNumber: '1',
     infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
       NSLocationWhenInUseUsageDescription:
         'Stalkr needs your location to show your position on the map and share it with your crew in real time.',
       NSLocationAlwaysAndWhenInUseUsageDescription:
