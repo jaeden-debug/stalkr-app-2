@@ -5,6 +5,10 @@ import { SelfMarkerMenu } from '@/components/map/SelfMarkerMenu';
 import { CrewMemberMenu } from '@/components/map/CrewMemberMenu';
 import { MarkerDetailSheet } from '@/components/markers/MarkerDetailSheet';
 import { ZoneDetailSheet } from '@/components/zones/ZoneDetailSheet';
+import { TacticalHud } from '@/components/ui/TacticalHud';
+import { SOSButton } from '@/components/ui/SOSButton';
+import { NavigationDrawer } from '@/components/ui/NavigationDrawer';
+import { ZoneCreationSheet } from '@/components/zones/ZoneCreationSheet';
 import { useMapStore } from '@/store/useMapStore';
 import { useLocationStore } from '@/store/useLocationStore';
 import { useGroupStore } from '@/store/useGroupStore';
@@ -33,6 +37,12 @@ export default function MapScreen() {
   return (
     <View style={styles.container}>
       <MapContainer />
+
+      {/* Tactical overlays */}
+      <TacticalHud />
+      <SOSButton />
+      <NavigationDrawer />
+      <ZoneCreationSheet />
 
       {/* Self menu */}
       <SelfMarkerMenu

@@ -14,6 +14,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { APP_CONFIG } from '@/config/app';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 export default function RegisterScreen() {
   const [displayName, setDisplayName] = useState('');
@@ -22,6 +23,7 @@ export default function RegisterScreen() {
   const { signUp, loading } = useAuthStore();
   const toast = useToast();
   const router = useRouter();
+  const { track } = useAnalytics();
 
   const handleRegister = async () => {
     if (!displayName.trim()) { toast.error('Enter a display name'); return; }
@@ -30,6 +32,7 @@ export default function RegisterScreen() {
 
     const success = await signUp(email.trim(), password, displayName.trim());
     if (success) {
+      track({ name: 'signed_up' });
       toast.success('Account created! Welcome to ' + APP_CONFIG.name);
       router.replace('/(tabs)/map');
     } else {

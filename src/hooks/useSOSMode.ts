@@ -10,6 +10,7 @@ import { logEvent } from '@/services/groupEvents';
 import { sendSOSNotification, sendLocalNotification } from '@/services/notifications';
 import { supabase } from '@/services/supabase';
 import { FEATURES } from '@/config/features';
+import { track } from '@/services/analytics';
 
 export function useSOSMode() {
   const userId = useAuthStore((s) => s.user?.id);
@@ -21,6 +22,7 @@ export function useSOSMode() {
 
   const triggerSOS = useCallback(async () => {
     if (!FEATURES.SOS_MODE || !userId) return;
+    track({ name: 'sos_triggered' });
 
     const coords = myLocation
       ? { latitude: myLocation.latitude, longitude: myLocation.longitude }
@@ -62,6 +64,7 @@ export function useSOSMode() {
   }, [userId, profile, activeGroupId, groupMembers, myLocation]);
 
   const dismissSOS = useCallback(() => {
+    track({ name: 'sos_cancelled' });
     clearSOS();
   }, [clearSOS]);
 

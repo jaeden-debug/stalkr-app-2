@@ -38,6 +38,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     config: {
       googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY,
     },
+    // Universal Links — iOS opens the app from https://stalkr.app/invite/*
+    // Requires AASA file at https://stalkr.app/.well-known/apple-app-site-association
+    associatedDomains: ['applinks:stalkr.app'],
   },
   android: {
     adaptiveIcon: {
@@ -61,9 +64,27 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY,
       },
     },
+    // Universal link handling — Android opens the app from https://stalkr.app/invite/*
+    intentFilters: [
+      {
+        action: 'VIEW',
+        autoVerify: true,
+        data: [
+          {
+            scheme: 'https',
+            host: 'stalkr.app',
+            pathPrefix: '/invite',
+          },
+        ],
+        category: ['BROWSABLE', 'DEFAULT'],
+      },
+    ],
   },
   web: {
     favicon: './assets/favicon.png',
+    // Bundler: metro (required for Expo Router SSR support)
+    bundler: 'metro',
+    output: 'server',
   },
   extra: {
     supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,

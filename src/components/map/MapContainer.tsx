@@ -4,8 +4,8 @@
  * Crew markers only rerender on their own data changes.
  */
 import React, { useCallback, useEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
-import MapView, { MapType } from 'react-native-maps';
+import { Platform, StyleSheet, View } from 'react-native';
+import MapView, { PROVIDER_GOOGLE } from 'react-native-maps';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { MAP_CONSTANTS } from '@/constants/map';
@@ -59,7 +59,8 @@ export const MapContainer: React.FC = () => {
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        mapType={isSatellite ? 'satellite' : 'standard'}
+        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+        mapType={isSatellite ? 'hybrid' : 'standard'}
         initialRegion={MAP_CONSTANTS.DEFAULT_REGION}
         showsUserLocation={false}
         showsCompass={false}
@@ -87,7 +88,7 @@ export const MapContainer: React.FC = () => {
         )}
       </MapView>
 
-      <MapControls mapRef={mapRef} />
+      <MapControls />
     </View>
   );
 };

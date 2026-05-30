@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Sheet } from '@/components/ui/Sheet';
 import { useToast } from '@/components/ui/Toast';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import type { Group } from '@/types/models';
 
 export default function GroupsScreen() {
@@ -32,6 +33,7 @@ export default function GroupsScreen() {
     setActiveGroupId,
   } = useGroupStore();
   const userId = useAuthStore((s) => s.user?.id);
+  const { track } = useAnalytics();
 
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [showJoinSheet, setShowJoinSheet] = useState(false);
@@ -50,6 +52,7 @@ export default function GroupsScreen() {
     const group = await createGroup(newGroupName.trim());
     setCreating(false);
     if (group) {
+      track({ name: 'group_created' });
       setShowCreateSheet(false);
       setNewGroupName('');
       toast.success(`"${group.name}" created!`);
@@ -64,6 +67,7 @@ export default function GroupsScreen() {
     const group = await joinByInviteCode(inviteCode.trim().toUpperCase());
     setJoining(false);
     if (group) {
+      track({ name: 'group_joined', properties: { method: 'invite_code' } });
       setShowJoinSheet(false);
       setInviteCode('');
       toast.success(`Joined "${group.name}"!`);

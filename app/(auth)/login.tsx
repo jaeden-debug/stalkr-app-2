@@ -14,6 +14,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { APP_CONFIG } from '@/config/app';
+import { useAnalytics } from '@/hooks/useAnalytics';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -21,6 +22,7 @@ export default function LoginScreen() {
   const { signIn, loading, error } = useAuthStore();
   const toast = useToast();
   const router = useRouter();
+  const { track } = useAnalytics();
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -29,6 +31,7 @@ export default function LoginScreen() {
     }
     const success = await signIn(email.trim(), password);
     if (success) {
+      track({ name: 'signed_in' });
       router.replace('/(tabs)/map');
     } else {
       toast.error(error || 'Login failed. Check your credentials.');

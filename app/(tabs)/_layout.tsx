@@ -37,7 +37,13 @@ export default function TabsLayout() {
         tabBarShowLabel: false,
       }}
     >
-      <Tabs.Screen name="map" options={{ tabBarIcon: ({ focused }) => <TabIcon emoji="🗺" label="Map" focused={focused} /> }} />
+      <Tabs.Screen
+        name="map"
+        options={{
+          tabBarIcon: ({ focused }) => <TabIcon emoji="🗺" label="Map" focused={focused} />,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
       <Tabs.Screen name="groups" options={{ tabBarIcon: ({ focused }) => <TabIcon emoji="👥" label="Crew" focused={focused} /> }} />
       <Tabs.Screen name="sessions" options={{ tabBarIcon: ({ focused }) => <TabIcon emoji="⚡" label="Sessions" focused={focused} /> }} />
       <Tabs.Screen name="settings" options={{ tabBarIcon: ({ focused }) => <TabIcon emoji="⚙️" label="Settings" focused={focused} /> }} />

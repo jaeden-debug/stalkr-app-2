@@ -1,39 +1,76 @@
 import '../global.css';
 import 'react-native-url-polyfill/auto';
 
-import { Stack } from 'expo-router';
+import { Stack, useNavigationContainerRef } from 'expo-router';
 import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as Sentry from '@sentry/react-native';
+import { PostHogProvider } from 'posthog-react-native';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useBillingStore } from '@/store/useBillingStore';
+import { initSentry, setSentryUser, clearSentryUser } from '@/services/sentry';
+import { initPostHog, identifyUser, resetAnalytics } from '@/services/analytics';
 
-export default function RootLayout() {
+// ── Initialise Sentry as early as possible (before any render) ────────────────
+initSentry();
+
+const posthogClient = initPostHog();
+
+function RootLayoutInner() {
   const initialize = useAuthStore((s) => s.initialize);
   const loadEntitlement = useBillingStore((s) => s.loadEntitlement);
+  const user = useAuthStore((s) => s.user);
 
+  // Bootstrap auth + billing on mount
   useEffect(() => {
     initialize();
     loadEntitlement();
   }, []);
 
+  // Keep Sentry + PostHog identity in sync with auth state
+  useEffect(() => {
+    if (user?.id) {
+      setSentryUser(user.id);
+      identifyUser(user.id);
+    } else {
+      clearSentryUser();
+      resetAnalytics();
+    }
+  }, [user?.id]);
+
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: '#0a0a0f' },
+        animation: 'fade',
+      }}
+    />
+  );
+}
+
+function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ErrorBoundary>
           <ToastProvider>
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: '#0a0a0f' },
-                animation: 'fade',
-              }}
-            />
+            {posthogClient ? (
+              <PostHogProvider client={posthogClient} autocapture>
+                <RootLayoutInner />
+              </PostHogProvider>
+            ) : (
+              <RootLayoutInner />
+            )}
           </ToastProvider>
         </ErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
+
+// Wrap the root with Sentry's error boundary + navigation instrumentation
+export default Sentry.wrap(RootLayout);

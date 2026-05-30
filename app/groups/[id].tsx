@@ -3,6 +3,7 @@ import {
   Alert,
   FlatList,
   SafeAreaView,
+  Switch,
   ScrollView,
   StyleSheet,
   Text,
@@ -38,6 +39,7 @@ export default function GroupDetailScreen() {
     deleteGroup,
     leaveGroup,
     removeMember,
+    updateMember,
   } = useGroupStore();
   const userId = useAuthStore((s) => s.user?.id);
 
@@ -120,6 +122,12 @@ export default function GroupDetailScreen() {
     ]);
   };
 
+  const handleToggleMemberTracking = async (item: GroupMember) => {
+    if (!isOwner || item.user_id === userId) return;
+    const nextStatus = item.status === 'live' ? 'offline' : 'live';
+    await updateMember(item.id, { status: nextStatus });
+  };
+
   const renderMember = ({ item }: { item: GroupMember }) => {
     const displayName =
       item.nickname_override ||
@@ -128,6 +136,7 @@ export default function GroupDetailScreen() {
       'Unknown';
     const color = getCrewColor(item.user_id);
     const isMe = item.user_id === userId;
+    const isLive = item.status === 'live';
 
     return (
       <TouchableOpacity
@@ -146,11 +155,25 @@ export default function GroupDetailScreen() {
           <Text style={styles.memberName}>{displayName}{isMe ? ' (You)' : ''}</Text>
           <Text style={styles.memberRole}>{item.role}</Text>
         </View>
-        <Badge
-          label={item.status === 'live' ? 'Live' : item.status === 'stale' ? 'Stale' : 'Offline'}
-          variant={item.status as any}
-          dot
-        />
+        {/* Owner can force-toggle any member's tracking; others see status badge */}
+        {isOwner && !isMe ? (
+          <View style={styles.trackingControl}>
+            <Text style={styles.trackingLabel}>TRACK</Text>
+            <Switch
+              value={isLive}
+              onValueChange={() => handleToggleMemberTracking(item)}
+              trackColor={{ false: '#2a2a3a', true: 'rgba(34,197,94,0.4)' }}
+              thumbColor={isLive ? '#22c55e' : '#6b7280'}
+              ios_backgroundColor="#2a2a3a"
+            />
+          </View>
+        ) : (
+          <Badge
+            label={isLive ? 'Live' : item.status === 'stale' ? 'Stale' : 'Offline'}
+            variant={item.status as any}
+            dot
+          />
+        )}
       </TouchableOpacity>
     );
   };
@@ -297,6 +320,8 @@ const styles = StyleSheet.create({
   memberInfo: { flex: 1 },
   memberName: { color: '#e8e8f0', fontSize: 15, fontWeight: '600' },
   memberRole: { color: '#8888aa', fontSize: 12, textTransform: 'capitalize', marginTop: 2 },
+  trackingControl: { alignItems: 'center', gap: 4 },
+  trackingLabel: { color: '#8888aa', fontSize: 9, fontWeight: '700', letterSpacing: 1 },
   actions: { margin: 16, marginTop: 8 },
   sheetContent: { padding: 20, gap: 16 },
   sheetLabel: { color: '#8888aa', fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8 },

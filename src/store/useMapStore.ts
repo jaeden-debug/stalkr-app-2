@@ -40,6 +40,13 @@ interface MapState {
   polygonDraftPoints: LatLng[];
   movingZoneId: string | null;
 
+  // Pending zone creation (set after tap/finish — triggers ZoneCreationSheet)
+  pendingZoneCreation: {
+    type: 'circle' | 'polygon';
+    coords: LatLng;
+    polygonPoints?: LatLng[];
+  } | null;
+
   // Trails
   userTrails: Record<string, LatLng[]>;
   visibleTrailUsers: Record<string, boolean>;
@@ -90,9 +97,12 @@ interface MapState {
   addPolygonDraftPoint: (point: LatLng) => void; // alias
   removeLastPolygonPoint: () => void;
   finishPolygonZone: () => void;
+  confirmZoneCreation: (name: string, notifyArrival: boolean, notifyLeave: boolean) => Promise<SavedPlace | null>;
+  cancelZoneCreation: () => void;
   setMovingZoneId: (id: string | null) => void;
   removeSavedPlaceFromStore: (id: string) => void;
   upsertSavedPlaceInStore: (place: SavedPlace) => void;
+  updateSavedPlaceInStore: (id: string, updates: Partial<SavedPlace>) => void;
 
   // Trails
   setUserTrail: (userId: string, points: LatLng[]) => void;
@@ -129,6 +139,7 @@ export const useMapStore = create<MapState>()(
       placingCircleZone: false,
       placingSavedPlace: false,
       placingPolygonZone: false,
+      pendingZoneCreation: null,
       polygonDraftPoints: [],
       movingZoneId: null,
       userTrails: {},
@@ -151,7 +162,12 @@ export const useMapStore = create<MapState>()(
           return;
         }
         if (placingCircleZone) {
-          // Zone placement handled in ZoneDetailSheet / modal
+          // Store coords and show ZoneCreationSheet
+          set({
+            placingCircleZone: false,
+            placingSavedPlace: false,
+            pendingZoneCreation: { type: 'circle', coords },
+          });
           return;
         }
         // Deselect everything
@@ -269,9 +285,55 @@ export const useMapStore = create<MapState>()(
         set((s) => ({ polygonDraftPoints: s.polygonDraftPoints.slice(0, -1) })),
 
       finishPolygonZone: () => {
-        // Signal that the polygon is ready — the caller (ZoneCreationSheet) reads polygonDraftPoints
-        set({ placingPolygonZone: false });
+        const { polygonDraftPoints } = get();
+        if (polygonDraftPoints.length < 3) return;
+        const lat = polygonDraftPoints.reduce((s, p) => s + p.latitude, 0) / polygonDraftPoints.length;
+        const lng = polygonDraftPoints.reduce((s, p) => s + p.longitude, 0) / polygonDraftPoints.length;
+        set({
+          placingPolygonZone: false,
+          polygonDraftPoints: [],
+          pendingZoneCreation: {
+            type: 'polygon',
+            coords: { latitude: lat, longitude: lng },
+            polygonPoints: polygonDraftPoints,
+          },
+        });
       },
+
+      confirmZoneCreation: async (name, notifyArrival, notifyLeave) => {
+        const { pendingZoneCreation } = get();
+        if (!pendingZoneCreation) return null;
+
+        const userId = useAuthStore.getState().user?.id;
+        const groupId = useGroupStore.getState().activeGroupId;
+        if (!userId || !groupId) return null;
+
+        const { type, coords, polygonPoints } = pendingZoneCreation;
+        set({ pendingZoneCreation: null });
+
+        const place = await savedPlaceService.createSavedPlace({
+          group_id: groupId,
+          created_by: userId,
+          name: name.trim() || (type === 'circle' ? 'Zone' : 'Polygon Zone'),
+          type: 'custom',
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          radius_meters: 100,
+          shape_type: type,
+          polygon_coords: type === 'polygon' ? polygonPoints : [],
+          notify_on_arrival: notifyArrival,
+          notify_on_leave: notifyLeave,
+          visible_to_group: true,
+          alert_rules: {},
+        } as any);
+
+        if (place) {
+          set((s) => ({ savedPlaces: [place, ...s.savedPlaces] }));
+        }
+        return place;
+      },
+
+      cancelZoneCreation: () => set({ pendingZoneCreation: null, polygonDraftPoints: [] }),
 
       setMovingZoneId: (id) => set({ movingZoneId: id }),
 
@@ -287,6 +349,11 @@ export const useMapStore = create<MapState>()(
               : [place, ...s.savedPlaces],
           };
         }),
+
+      updateSavedPlaceInStore: (id, updates) =>
+        set((s) => ({
+          savedPlaces: s.savedPlaces.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+        })),
 
       setUserTrail: (userId, points) =>
         set((s) => ({ userTrails: { ...s.userTrails, [userId]: points } })),
