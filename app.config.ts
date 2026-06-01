@@ -35,9 +35,6 @@ export default ({ config }: ConfigContext): any => ({
         'Stalkr uses background location to keep your crew aware of your position and send zone alerts while you are in the field.',
       UIBackgroundModes: ['location', 'fetch', 'remote-notification'],
     },
-    config: {
-      googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY,
-    },
     // Universal Links — iOS opens the app from https://stalkr.app/invite/*
     // Requires AASA file at https://stalkr.app/.well-known/apple-app-site-association
     associatedDomains: ['applinks:stalkr.app'],

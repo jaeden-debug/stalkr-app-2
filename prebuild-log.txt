@@ -1,0 +1,12 @@
+env: load .env
+env: export EAS_PROJECT_ID EXPO_OWNER EXPO_PUBLIC_ANDROID_PACKAGE EXPO_PUBLIC_APP_NAME EXPO_PUBLIC_BUNDLE_ID EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY EXPO_PUBLIC_PROJECT_SLUG EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY EXPO_PUBLIC_REVENUECAT_IOS_API_KEY EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_SUPABASE_URL
+- Clearing ios
+✔ Cleared ios code
+- Creating native directory (./ios)
+✔ Created native directory
+- Updating package.json
+✔ Updated package.json | no changes
+- Running prebuild
+✔ Finished prebuild
+- Installing CocoaPods...
+✔ Installed CocoaPods
