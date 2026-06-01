@@ -23,7 +23,6 @@
     "@supabase/supabase-js": "^2.43.4",
     "expo": "^56.0.8",
     "expo-application": "~56.0.3",
-    "expo-av": "~14.0.7",
     "expo-battery": "~56.0.4",
     "expo-blur": "~56.0.3",
     "expo-build-properties": "~56.0.16",

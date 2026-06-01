@@ -104,6 +104,13 @@ export default ({ config }: ConfigContext): any => ({
       },
     ],
     [
+      'react-native-maps',
+      {
+        // Uses react-native-maps/Google subspec on iOS (not the old react-native-google-maps pod)
+        iosGoogleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY,
+      },
+    ],
+    [
       'expo-build-properties',
       {
         ios: {
