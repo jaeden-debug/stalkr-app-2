@@ -54,7 +54,7 @@ export const MapControls: React.FC = memo(() => {
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     pointerEvents: 'box-none',
   },
   banner: {

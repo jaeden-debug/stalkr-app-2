@@ -58,7 +58,7 @@ export const MapContainer: React.FC = () => {
     <View style={styles.container}>
       <MapView
         ref={mapRef}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
         mapType={isSatellite ? 'hybrid' : 'standard'}
         initialRegion={MAP_CONSTANTS.DEFAULT_REGION}

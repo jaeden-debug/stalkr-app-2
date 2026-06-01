@@ -17,7 +17,7 @@
  *   Served at: https://stalkr.app/assets/social/<filename>
  *   Dimensions: 1200 × 630  (optimal for all major platforms)
  */
-import { Head } from 'expo-router/head';
+import Head from 'expo-router/head';
 import { useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -324,8 +324,9 @@ const styles = StyleSheet.create({
   },
   // Subtle diagonal grid lines for tactical feel (pure CSS on web)
   gridOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     opacity: 0.035,
+    // @ts-expect-error web-only CSS property
     backgroundImage:
       'repeating-linear-gradient(0deg, #22c55e 0px, transparent 1px, transparent 40px), repeating-linear-gradient(90deg, #22c55e 0px, transparent 1px, transparent 40px)' as any,
   },

@@ -162,7 +162,7 @@ export const ZoneCreationSheet: React.FC = () => {
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject as any,
+    ...StyleSheet.absoluteFill as any,
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(0,0,0,0.5)',
   },

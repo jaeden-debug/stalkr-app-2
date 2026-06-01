@@ -150,7 +150,7 @@ export const NavigationDrawer: React.FC = () => {
 
   // Wire module-level ref
   useEffect(() => {
-    _sheetRef = sheetRef;
+    _sheetRef = sheetRef as any;
     return () => { _sheetRef = null; };
   }, []);
 

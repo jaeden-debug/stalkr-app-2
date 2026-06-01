@@ -4,7 +4,7 @@ const APP_NAME = process.env.EXPO_PUBLIC_APP_NAME || 'Stalkr';
 const BUNDLE_ID = process.env.EXPO_PUBLIC_BUNDLE_ID || 'com.stalkr.app';
 const ANDROID_PACKAGE = process.env.EXPO_PUBLIC_ANDROID_PACKAGE || 'com.stalkr.app';
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
+export default ({ config }: ConfigContext): any => ({
   ...config,
   name: APP_NAME,
   slug: 'stalkr',
@@ -110,7 +110,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-build-properties',
       {
         ios: {
-          deploymentTarget: '15.0',
+          deploymentTarget: "16.4",
         },
         android: {
           compileSdkVersion: 34,

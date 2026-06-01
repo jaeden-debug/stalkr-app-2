@@ -109,5 +109,5 @@ export function track(event: AnalyticsEvent) {
 
 /** Track a screen view. Call in each screen's useEffect or via navigation listener. */
 export function screen(name: string, properties?: Record<string, unknown>) {
-  _client?.screen(name, properties);
+  _client?.screen(name, properties as any);
 }
