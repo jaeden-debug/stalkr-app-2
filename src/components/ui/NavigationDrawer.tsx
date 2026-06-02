@@ -1,26 +1,16 @@
 /**
- * NavigationDrawer — Stalkr 1-style bottom-up tactical drawer.
+ * NavigationDrawer — Stalkr tactical bottom-sheet drawer.
+ * Aesthetic: BlurView glass, ALL CAPS weight-900, Ionicons, #4ADE80 green.
  *
- * Architecture:
- *   • @gorhom/bottom-sheet v4  (snap: collapsed handle → full panel)
- *   • Two snap points: 120px collapsed peek, 88% expanded
- *   • Exports `openDrawer()` / `closeDrawer()` via module-level ref so
- *     TacticalHud or any screen can open it without prop drilling
- *
- * Panels:
- *   • Crew tab  — live member list with status dots, battery, last-seen
- *   • Groups tab — group switcher
- *   • Controls   — GO LIVE toggle, share invite, session link, settings
- *
- * Wired to:
- *   useGroupStore, useAuthStore, useLocationStore, useMapStore, useSessionStore
+ * Collapsed: crew name + live count + GO DARK / GO LIVE toggle
+ * Expanded:  MEMBERS tab | CREWS tab | quick-action grid | stealth card
  */
 import BottomSheet, {
   BottomSheetScrollView,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { BlurView } from 'expo-blur';
-import { Share } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, {
@@ -35,8 +25,9 @@ import {
   Animated,
   Dimensions,
   Modal,
+  Platform,
+  Share,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -48,1212 +39,733 @@ import { useMapStore } from '@/store/useMapStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useGoDark } from '@/hooks/useGoDark';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import { getCrewColor, CREW_COLORS } from '@/constants/map';
+import { getCrewColor } from '@/constants/map';
 import { MARKER_TYPES } from '@/constants/markerTypes';
 import { timeAgo, getLocationStatus } from '@/utils/time';
+import { getDistance, formatDistance } from '@/utils/distance';
+import { C } from '@/constants/theme';
 import type { GroupMember } from '@/types/models';
 import type { MarkerType } from '@/types/database';
 
 const { height: SCREEN_H } = Dimensions.get('window');
-const COLLAPSED_H = 120;
+const COLLAPSED_H = 118;
 
-// ─── Module-level ref so any component can imperatively open/close ─────────────
+// Ionicons marker map — no emojis
+const MARKER_ICONS: Record<string, React.ComponentProps<typeof Ionicons>['name']> = {
+  waypoint:     'pin',
+  danger:       'warning',
+  safe_zone:    'shield-checkmark',
+  camp:         'bonfire',
+  vehicle:      'car-sport',
+  animal_sign:  'paw',
+  evidence:     'search',
+  supply_cache: 'cube',
+  custom:       'add-circle',
+};
+
+const MARKER_COLORS: Record<string, string> = {
+  waypoint:     '#4ADE80',
+  danger:       '#EF4444',
+  safe_zone:    '#60A5FA',
+  camp:         '#F97316',
+  vehicle:      '#FACC15',
+  animal_sign:  '#A855F7',
+  evidence:     '#22D3EE',
+  supply_cache: '#EAB308',
+  custom:       '#FFFFFF',
+};
+
+// ─── Module-level imperative ref ─────────────────────────────────────────────
 let _sheetRef: React.RefObject<BottomSheet> | null = null;
-
-export function openDrawer() {
-  _sheetRef?.current?.snapToIndex(1);
-}
-export function closeDrawer() {
-  _sheetRef?.current?.snapToIndex(0);
-}
+export function openDrawer()  { _sheetRef?.current?.snapToIndex(1); }
+export function closeDrawer() { _sheetRef?.current?.snapToIndex(0); }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function getInitials(member: GroupMember): string {
-  if (member.initials_override) return member.initials_override.toUpperCase().slice(0, 2);
-  if (member.profile?.initials) return member.profile.initials.toUpperCase().slice(0, 2);
-  const name = member.profile?.nickname || member.profile?.display_name || '';
+function getInitials(m: GroupMember): string {
+  if (m.initials_override) return m.initials_override.toUpperCase().slice(0, 2);
+  if (m.profile?.initials) return m.profile.initials.toUpperCase().slice(0, 2);
+  const name = m.profile?.nickname ?? m.profile?.display_name ?? '';
   const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-  return name.slice(0, 2).toUpperCase() || '??';
+  return parts.length >= 2
+    ? `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+    : name.slice(0, 2).toUpperCase() || '??';
 }
-
-function getDisplayName(member: GroupMember): string {
+function getDisplayName(m: GroupMember): string {
   return (
-    member.nickname_override ||
-    member.profile?.nickname ||
-    member.profile?.display_name ||
+    m.nickname_override ??
+    m.profile?.nickname ??
+    m.profile?.display_name ??
     'Unknown'
   );
 }
 
-// ─── Status dot colour ────────────────────────────────────────────────────────
-function statusColor(status: string): string {
-  if (status === 'live') return '#22c55e';
-  if (status === 'stale') return '#f59e0b';
-  return '#4a4a60';
+// ─── Pulse hook ───────────────────────────────────────────────────────────────
+function usePulse(active: boolean) {
+  const anim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!active) { anim.setValue(1); return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 0.2, duration: 600, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 1,   duration: 600, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [active]);
+  return anim;
 }
 
-// ─── Crew member row ──────────────────────────────────────────────────────────
+// ─── Member row ───────────────────────────────────────────────────────────────
 interface MemberRowProps {
   member: GroupMember;
   isMe: boolean;
   liveLocation?: { status: string; battery_level: number | null; updated_at: string } | null;
+  myLat?: number;
+  myLng?: number;
 }
 
-const MemberRow: React.FC<MemberRowProps> = ({ member, isMe, liveLocation }) => {
-  const initials = getInitials(member);
-  const name = getDisplayName(member);
-  const color = getCrewColor(member.user_id);
-  const status = liveLocation ? getLocationStatus(liveLocation.updated_at) : member.status;
-  const dotColor = statusColor(status);
-  const lastSeen = liveLocation?.updated_at ? timeAgo(liveLocation.updated_at) : 'offline';
+const MemberRow: React.FC<MemberRowProps> = ({ member, isMe, liveLocation, myLat, myLng }) => {
+  const initials  = getInitials(member);
+  const name      = getDisplayName(member);
+  const color     = getCrewColor(member.user_id);
+  const status    = liveLocation ? getLocationStatus(liveLocation.updated_at) : member.status;
+  const isLive    = status === 'live';
+  const lastSeen  = liveLocation?.updated_at ? timeAgo(liveLocation.updated_at) : null;
+
+  const distText = useMemo(() => {
+    const loc = liveLocation as any;
+    if (!myLat || !myLng || !loc?.latitude || !loc?.longitude) return null;
+    return formatDistance(getDistance(
+      { latitude: myLat, longitude: myLng },
+      { latitude: loc.latitude, longitude: loc.longitude },
+    ));
+  }, [myLat, myLng, (liveLocation as any)?.latitude, (liveLocation as any)?.longitude]);
 
   return (
-    <View style={styles.memberRow}>
+    <View style={ms.row}>
       {/* Status dot */}
-      <View style={[styles.statusDot, { backgroundColor: dotColor }]} />
+      <View style={[ms.dot, {
+        backgroundColor: isLive ? C.green : status === 'stale' ? C.amber : 'rgba(255,255,255,0.2)',
+      }]} />
 
-      {/* Avatar circle */}
-      <View style={[styles.avatar, { backgroundColor: color + '33', borderColor: color }]}>
-        <Text style={[styles.avatarText, { color }]}>{initials}</Text>
+      {/* Avatar */}
+      <View style={[ms.avatar, { backgroundColor: color + '22', borderColor: color + '55' }]}>
+        <Text style={[ms.initials, { color }]}>{initials}</Text>
       </View>
 
       {/* Info */}
-      <View style={styles.memberInfo}>
-        <Text style={styles.memberName} numberOfLines={1}>
-          {isMe ? `${name} (you)` : name}
+      <View style={ms.info}>
+        <Text style={ms.name} numberOfLines={1}>
+          {isMe ? `${name.toUpperCase()} (YOU)` : name.toUpperCase()}
         </Text>
-        {member.role === 'owner' || member.role === 'admin' ? (
-          <Text style={styles.memberRole}>{member.role.toUpperCase()}</Text>
-        ) : null}
+        <View style={ms.metaRow}>
+          {member.role !== 'member' && (
+            <Text style={[ms.badge, { color: C.green }]}>{member.role.toUpperCase()} · </Text>
+          )}
+          <Text style={[ms.status, { color: isLive ? C.green : C.amber }]}>
+            {isLive ? 'LIVE' : lastSeen ? `${lastSeen}` : 'OFFLINE'}
+          </Text>
+          {distText && <Text style={ms.dist}> · {distText}</Text>}
+        </View>
       </View>
 
-      {/* Right side: last seen + battery */}
-      <View style={styles.memberMeta}>
-        {liveLocation?.battery_level != null && (
-          <Text style={styles.batteryText}>
-            🔋{liveLocation.battery_level}%
-          </Text>
-        )}
-        <Text style={[styles.lastSeen, { color: dotColor }]}>
-          {status === 'live' ? 'LIVE' : lastSeen}
-        </Text>
-      </View>
+      {/* Battery */}
+      {liveLocation?.battery_level != null && (
+        <View style={ms.battery}>
+          <Ionicons
+            name={liveLocation.battery_level > 50 ? 'battery-half' : 'battery-dead'}
+            size={13}
+            color={liveLocation.battery_level < 20 ? C.red : 'rgba(255,255,255,0.4)'}
+          />
+          <Text style={ms.battText}>{liveLocation.battery_level}%</Text>
+        </View>
+      )}
     </View>
   );
 };
 
-// ─── NavigationDrawer ────────────────────────────────────────────────────────
+const ms = StyleSheet.create({
+  row:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 20, gap: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  dot:     { width: 7, height: 7, borderRadius: 4, flexShrink: 0 },
+  avatar:  { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  initials:{ fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
+  info:    { flex: 1 },
+  name:    { color: C.textPrimary, fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  badge:   { fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
+  status:  { fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  dist:    { color: 'rgba(255,255,255,0.4)', fontSize: 9, fontWeight: '700' },
+  battery: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  battText:{ color: 'rgba(255,255,255,0.4)', fontSize: 9, fontWeight: '700' },
+});
+
+// ─── NavigationDrawer ─────────────────────────────────────────────────────────
 export const NavigationDrawer: React.FC = () => {
   const sheetRef = useRef<BottomSheet>(null);
-  const router = useRouter();
+  const router   = useRouter();
 
-  // Wire module-level ref
   useEffect(() => {
     _sheetRef = sheetRef as any;
     return () => { _sheetRef = null; };
   }, []);
 
-  const snapPoints = useMemo(() => [COLLAPSED_H, '88%'], []);
-  const [sheetIndex, setSheetIndex] = useState(0);
-  const [activeTab, setActiveTab] = useState<'crew' | 'groups'>('crew');
-  const [showMarkerModal, setShowMarkerModal] = useState(false);
-  const [showZoneModal, setShowZoneModal] = useState(false);
+  const snapPoints = useMemo(() => [COLLAPSED_H, Math.round(SCREEN_H * 0.88)], []);
+  const [idx, setIdx]         = useState(0);
+  const [tab, setTab]         = useState<'crew' | 'groups'>('crew');
+  const [markerModal, setMarkerModal] = useState(false);
+  const [zoneModal, setZoneModal]     = useState(false);
 
   // ── Stores ──────────────────────────────────────────────────────────────────
-  const userId = useAuthStore((s) => s.user?.id);
-  const profile = useAuthStore((s) => s.profile);
-
-  const groups = useGroupStore((s) => s.groups);
-  const activeGroupId = useGroupStore((s) => s.activeGroupId);
-  const groupMembers = useGroupStore((s) => s.groupMembers);
+  const userId    = useAuthStore((s) => s.user?.id);
+  const groups    = useGroupStore((s) => s.groups);
+  const activeGroupId  = useGroupStore((s) => s.activeGroupId);
+  const groupMembers   = useGroupStore((s) => s.groupMembers);
   const membersLoading = useGroupStore((s) => s.membersLoading);
   const setActiveGroupId = useGroupStore((s) => s.setActiveGroupId);
   const loadGroupMembers = useGroupStore((s) => s.loadGroupMembers);
-
-  const activeGroup = useMemo(
-    () => groups.find((g) => g.id === activeGroupId) ?? null,
-    [groups, activeGroupId],
-  );
+  const activeGroup = useMemo(() => groups.find((g) => g.id === activeGroupId) ?? null, [groups, activeGroupId]);
 
   const isBroadcasting = useLocationStore((s) => s.isBroadcasting);
-  const setIsBroadcasting = useLocationStore((s) => s.setIsBroadcasting);
-  const crewLocations = useLocationStore((s) => s.crewLocations);
+  const crewLocations  = useLocationStore((s) => s.crewLocations);
+  const myLocation     = useMapStore((s) => s.myLocation);
+  const activeSession  = useSessionStore((s) => s.activeSession);
 
-  const activeSession = useSessionStore((s) => s.activeSession);
+  const { isDark, isEnforced, isLoading: darkLoading, toggle: toggleDark } = useGoDark();
+  const { track } = useAnalytics();
 
-  // Load members when active group changes
   useEffect(() => {
     if (activeGroupId) loadGroupMembers(activeGroupId);
   }, [activeGroupId]);
 
-  // ── Go Dark ───────────────────────────────────────────────────────────────
-  const { isDark, isEnforced, isLoading: darkLoading, toggle: toggleDark } = useGoDark();
-  const { track } = useAnalytics();
+  const liveCount = useMemo(
+    () => groupMembers.filter((m) => {
+      const loc = crewLocations[m.user_id];
+      return loc ? getLocationStatus((loc as any).updated_at) === 'live' : m.status === 'live';
+    }).length,
+    [groupMembers, crewLocations],
+  );
+
+  const livePulse = usePulse(isBroadcasting && !isDark);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
-  const handleToggleBroadcast = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsBroadcasting(!isBroadcasting);
-  }, [isBroadcasting, setIsBroadcasting]);
-
   const handleGoDark = useCallback(() => {
+    if (isEnforced || darkLoading) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     track({ name: isDark ? 'go_live_activated' : 'go_dark_activated' });
     toggleDark();
-  }, [toggleDark, isDark, track]);
+  }, [isDark, isEnforced, darkLoading, toggleDark, track]);
 
   const handleShareInvite = useCallback(async () => {
     if (!activeGroup?.invite_code) return;
     try {
       await Share.share({
         title: `Join ${activeGroup.name} on Stalkr`,
-        message: `Join my crew "${activeGroup.name}" with invite code: ${activeGroup.invite_code}`,
+        message: `Join my crew "${activeGroup.name}"\nInvite code: ${activeGroup.invite_code}`,
       });
-      track({ name: 'invite_shared', properties: { method: 'share_sheet' } });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch {
-      Alert.alert('Share failed', 'Could not share invite code.');
-    }
+      track({ name: 'invite_shared', properties: { method: 'share_sheet' } });
+    } catch {}
   }, [activeGroup, track]);
 
-  const handleSelectGroup = useCallback(
-    (groupId: string) => {
-      Haptics.selectionAsync();
-      setActiveGroupId(groupId);
-      track({ name: 'active_group_switched' });
-      sheetRef.current?.snapToIndex(0);
-      setActiveTab('crew');
-    },
-    [setActiveGroupId, track],
-  );
-
-  const handleOpenSettings = useCallback(() => {
+  const handleSelectGroup = useCallback((groupId: string) => {
+    Haptics.selectionAsync();
+    setActiveGroupId(groupId);
     sheetRef.current?.snapToIndex(0);
-    router.push('/(tabs)/settings');
-  }, [router]);
-
-  const handleOpenSessions = useCallback(() => {
-    sheetRef.current?.snapToIndex(0);
-    router.push('/(tabs)/sessions');
-  }, [router]);
-
-  const handleOpenMarkerPicker = useCallback(() => {
-    if (!activeGroupId) {
-      Alert.alert('NO ACTIVE CREW', 'Select or create a crew before placing a marker.');
-      return;
-    }
-    setShowMarkerModal(true);
-  }, [activeGroupId]);
+    setTab('crew');
+  }, [setActiveGroupId]);
 
   const handleSelectMarkerType = useCallback((type: MarkerType) => {
-    setShowMarkerModal(false);
+    setMarkerModal(false);
     sheetRef.current?.snapToIndex(0);
-    track({ name: 'marker_placed', properties: { marker_type: type } });
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     useMapStore.getState().startMarkerPlacement(type);
-    setTimeout(() => {
-      Alert.alert('DROP A PIN', 'Tap anywhere on the map to place this marker.', [
-        { text: 'OK', style: 'default' },
-      ]);
-    }, 350);
+    track({ name: 'marker_placed', properties: { marker_type: type } });
   }, [track]);
 
-  const handleOpenZonePicker = useCallback(() => {
-    if (!activeGroupId) {
-      Alert.alert('NO ACTIVE CREW', 'Select or create a crew before placing a zone.');
-      return;
-    }
-    setShowZoneModal(true);
-  }, [activeGroupId]);
-
   const handleSelectZoneType = useCallback((type: 'circle' | 'polygon') => {
-    setShowZoneModal(false);
+    setZoneModal(false);
     sheetRef.current?.snapToIndex(0);
-    if (type === 'circle') {
-      useMapStore.getState().startCircleZonePlacement();
-      setTimeout(() => {
-        Alert.alert('PLACE CIRCLE ZONE', 'Tap the map to set the zone center.', [
-          { text: 'OK', style: 'default' },
-        ]);
-      }, 350);
-    } else {
-      useMapStore.getState().startPolygonZonePlacement();
-      setTimeout(() => {
-        Alert.alert('DRAW POLYGON ZONE', 'Tap the map to add points. Tap Finish when done.', [
-          { text: 'OK', style: 'default' },
-        ]);
-      }, 350);
-    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (type === 'circle') useMapStore.getState().startCircleZonePlacement();
+    else useMapStore.getState().startPolygonZonePlacement();
   }, []);
 
-  // ── Live counts ────────────────────────────────────────────────────────────
-  const liveCount = useMemo(
-    () => groupMembers.filter((m) => {
-      const loc = crewLocations[m.user_id];
-      return loc ? getLocationStatus(loc.updated_at) === 'live' : m.status === 'live';
-    }).length,
-    [groupMembers, crewLocations],
-  );
-
-  // ── Render ─────────────────────────────────────────────────────────────────
-  const isExpanded = sheetIndex > 0;
+  const isExpanded = idx > 0;
 
   return (
     <>
-    <BottomSheet
-      ref={sheetRef}
-      index={0}
-      snapPoints={snapPoints}
-      onChange={setSheetIndex}
-      backgroundStyle={styles.sheetBg}
-      handleIndicatorStyle={styles.handleIndicator}
-      enablePanDownToClose={false}
-    >
-      {/* ── Collapsed peek ─────────────────────────────────────────────────── */}
-      <BottomSheetView style={styles.peekRow}>
-        {/* Group name + live count */}
-        <TouchableOpacity
-          style={styles.peekGroup}
-          onPress={() => sheetRef.current?.snapToIndex(1)}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.peekDot, { backgroundColor: isBroadcasting ? '#22c55e' : '#4a4a60' }]} />
-          <Text style={styles.peekGroupName} numberOfLines={1}>
-            {activeGroup ? activeGroup.name.toUpperCase() : 'NO CREW'}
-          </Text>
-          {liveCount > 0 && (
-            <View style={styles.peekBadge}>
-              <Text style={styles.peekBadgeText}>{liveCount} LIVE</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-
-        {/* Quick GO DARK / GO LIVE toggle */}
-        <TouchableOpacity
-          style={[styles.peekToggleRow, isDark && styles.peekToggleRowDark]}
-          onPress={handleGoDark}
-          disabled={isEnforced || darkLoading}
-          activeOpacity={0.75}
-        >
-          <Text style={[styles.peekToggleLabel, isDark && styles.peekToggleLabelDark]}>
-            {isDark ? '🌑 DARK' : '⚡ LIVE'}
-          </Text>
-        </TouchableOpacity>
-      </BottomSheetView>
-
-      {/* ── Expanded content ────────────────────────────────────────────────── */}
-      {isExpanded && (
-        <>
-          {/* Tab bar */}
-          <View style={styles.tabBar}>
-            <TouchableOpacity
-              style={[styles.tab, activeTab === 'crew' && styles.tabActive]}
-              onPress={() => setActiveTab('crew')}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.tabText, activeTab === 'crew' && styles.tabTextActive]}>
-                MEMBERS {groupMembers.length > 0 ? `(${groupMembers.length})` : ''}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, activeTab === 'groups' && styles.tabActive]}
-              onPress={() => setActiveTab('groups')}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.tabText, activeTab === 'groups' && styles.tabTextActive]}>
-                CREWS {groups.length > 0 ? `(${groups.length})` : ''}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <BottomSheetScrollView
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
+      <BottomSheet
+        ref={sheetRef}
+        index={0}
+        snapPoints={snapPoints}
+        onChange={setIdx}
+        enablePanDownToClose={false}
+        backgroundComponent={({ style }) => (
+          <BlurView intensity={95} tint="dark" style={[style, styles.glass]} />
+        )}
+        handleComponent={() => (
+          <TouchableOpacity
+            style={styles.handle}
+            onPress={() => sheetRef.current?.snapToIndex(idx === 0 ? 1 : 0)}
+            activeOpacity={0.9}
           >
-            {/* ── Crew tab ── */}
-            {activeTab === 'crew' && (
-              <>
-                {activeGroup ? (
-                  <>
-                    {membersLoading && groupMembers.length === 0 ? (
-                      // Skeleton rows while loading
-                      [0, 1, 2].map((i) => (
-                        <View key={i} style={[styles.memberRow, { opacity: 0.4 }]}>
-                          <View style={[styles.statusDot, { backgroundColor: '#2a2a3a' }]} />
-                          <View style={[styles.avatar, { backgroundColor: '#1e1e28', borderColor: '#2a2a3a' }]} />
-                          <View style={styles.memberInfo}>
-                            <View style={{ width: 90, height: 12, backgroundColor: '#2a2a3a', borderRadius: 4 }} />
-                          </View>
-                        </View>
-                      ))
-                    ) : groupMembers.length === 0 && !membersLoading ? (
-                      <View style={styles.emptyState}>
-                        <Text style={styles.emptyIcon}>👥</Text>
-                        <Text style={styles.emptyText}>No crew members yet.</Text>
-                        <Text style={styles.emptySubtext}>
-                          Share your invite code to add people.
-                        </Text>
-                      </View>
-                    ) : (
-                      groupMembers.map((member) => (
-                        <MemberRow
-                          key={member.id}
-                          member={member}
-                          isMe={member.user_id === userId}
-                          liveLocation={crewLocations[member.user_id] as any ?? null}
-                        />
-                      ))
-                    )}
-                  </>
-                ) : (
-                  <View style={styles.emptyState}>
-                    <Text style={styles.emptyIcon}>⚡</Text>
-                    <Text style={styles.emptyText}>No active crew.</Text>
-                    <Text style={styles.emptySubtext}>
-                      Select a crew below or create one.
-                    </Text>
-                  </View>
-                )}
-              </>
-            )}
+            <View style={styles.handleBar} />
+          </TouchableOpacity>
+        )}
+        style={{ zIndex: 5000, elevation: 5000 }}
+      >
 
-            {/* ── Groups tab ── */}
-            {activeTab === 'groups' && (
-              <>
-                {groups.length === 0 ? (
-                  <View style={styles.emptyState}>
-                    <Text style={styles.emptyIcon}>📡</Text>
-                    <Text style={styles.emptyText}>No crews yet.</Text>
-                    <Text style={styles.emptySubtext}>
-                      Create or join a crew to get started.
-                    </Text>
+        {/* ── Collapsed peek ── */}
+        <BottomSheetView style={styles.peek}>
+          <TouchableOpacity
+            style={styles.peekLeft}
+            onPress={() => sheetRef.current?.snapToIndex(1)}
+            activeOpacity={0.8}
+          >
+            <Animated.View style={[styles.peekDot, {
+              backgroundColor: isDark ? C.red : C.green,
+              opacity: isDark ? 1 : livePulse,
+            }]} />
+            <View>
+              <Text style={styles.peekCrew} numberOfLines={1}>
+                {activeGroup?.name?.toUpperCase() ?? 'NO ACTIVE CREW'}
+              </Text>
+              {liveCount > 0 && (
+                <Text style={styles.peekSub}>{liveCount} LIVE</Text>
+              )}
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.peekToggle, isDark && styles.peekToggleDark]}
+            onPress={handleGoDark}
+            disabled={isEnforced || darkLoading}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name={isDark ? 'eye-off' : 'radio'}
+              size={13}
+              color={isDark ? C.red : C.green}
+            />
+            <Text style={[styles.peekToggleText, { color: isDark ? C.red : C.green }]}>
+              {darkLoading ? '...' : isDark ? 'DARK' : 'LIVE'}
+            </Text>
+          </TouchableOpacity>
+        </BottomSheetView>
+
+        {/* ── Expanded ── */}
+        {isExpanded && (
+          <>
+            {/* Tab bar */}
+            <View style={styles.tabBar}>
+              {(['crew', 'groups'] as const).map((t) => (
+                <TouchableOpacity
+                  key={t}
+                  style={[styles.tabItem, tab === t && styles.tabItemActive]}
+                  onPress={() => setTab(t)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
+                    {t === 'crew'
+                      ? `MEMBERS${groupMembers.length ? ` (${groupMembers.length})` : ''}`
+                      : `CREWS${groups.length ? ` (${groups.length})` : ''}`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <BottomSheetScrollView
+              contentContainerStyle={styles.scroll}
+              showsVerticalScrollIndicator={false}
+            >
+              {/* MEMBERS TAB */}
+              {tab === 'crew' && (
+                activeGroup ? (
+                  membersLoading && groupMembers.length === 0 ? (
+                    [0,1,2].map((i) => (
+                      <View key={i} style={[ms.row, { opacity: 0.3 }]}>
+                        <View style={[ms.dot, { backgroundColor: '#333' }]} />
+                        <View style={[ms.avatar, { backgroundColor: '#1a1a28', borderColor: '#2a2a3a' }]} />
+                        <View style={[ms.info]}>
+                          <View style={{ width: 80, height: 10, backgroundColor: '#2a2a3a', borderRadius: 4 }} />
+                        </View>
+                      </View>
+                    ))
+                  ) : groupMembers.length === 0 ? (
+                    <View style={styles.empty}>
+                      <Ionicons name="people-outline" size={36} color="rgba(255,255,255,0.15)" />
+                      <Text style={styles.emptyTitle}>NO CREW MEMBERS</Text>
+                      <Text style={styles.emptySub}>Share your invite code to add people.</Text>
+                    </View>
+                  ) : (
+                    groupMembers.map((m) => (
+                      <MemberRow
+                        key={m.id}
+                        member={m}
+                        isMe={m.user_id === userId}
+                        liveLocation={crewLocations[m.user_id] as any ?? null}
+                        myLat={myLocation?.latitude}
+                        myLng={myLocation?.longitude}
+                      />
+                    ))
+                  )
+                ) : (
+                  <View style={styles.empty}>
+                    <Ionicons name="radio-outline" size={36} color="rgba(255,255,255,0.15)" />
+                    <Text style={styles.emptyTitle}>NO ACTIVE CREW</Text>
+                    <Text style={styles.emptySub}>Select or create a crew below.</Text>
+                  </View>
+                )
+              )}
+
+              {/* CREWS TAB */}
+              {tab === 'groups' && (
+                groups.length === 0 ? (
+                  <View style={styles.empty}>
+                    <Ionicons name="people-circle-outline" size={36} color="rgba(255,255,255,0.15)" />
+                    <Text style={styles.emptyTitle}>NO CREWS YET</Text>
+                    <Text style={styles.emptySub}>Create or join a crew to get started.</Text>
                   </View>
                 ) : (
-                  groups.map((group) => (
+                  groups.map((g) => (
                     <TouchableOpacity
-                      key={group.id}
-                      style={[
-                        styles.groupRow,
-                        group.id === activeGroupId && styles.groupRowActive,
-                      ]}
-                      onPress={() => handleSelectGroup(group.id)}
+                      key={g.id}
+                      style={[styles.groupRow, g.id === activeGroupId && styles.groupRowActive]}
+                      onPress={() => handleSelectGroup(g.id)}
                       activeOpacity={0.75}
                     >
-                      {group.id === activeGroupId && (
-                        <View style={styles.groupActiveDot} />
-                      )}
-                      <View style={styles.groupRowInfo}>
-                        <Text
-                          style={[
-                            styles.groupRowName,
-                            group.id === activeGroupId && styles.groupRowNameActive,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {group.name.toUpperCase()}
-                        </Text>
-                        <Text style={styles.groupRowType}>
-                          {group.type?.toUpperCase() ?? 'CUSTOM'}
-                          {group.tracking_mode === 'enforced' ? ' · ENFORCED' : ''}
-                        </Text>
+                      <View style={styles.groupRowLeft}>
+                        {g.id === activeGroupId && (
+                          <View style={styles.groupActiveDot} />
+                        )}
+                        <View>
+                          <Text style={[styles.groupName, g.id === activeGroupId && styles.groupNameActive]} numberOfLines={1}>
+                            {g.name.toUpperCase()}
+                          </Text>
+                          <Text style={styles.groupMeta}>
+                            {g.type?.toUpperCase() ?? 'CUSTOM'}
+                            {g.tracking_mode === 'enforced' ? ' · ENFORCED' : ''}
+                          </Text>
+                        </View>
                       </View>
-                      {group.id === activeGroupId && (
-                        <Text style={styles.groupActiveLabel}>ACTIVE</Text>
+                      {g.id === activeGroupId && (
+                        <View style={styles.groupActiveBadge}>
+                          <Text style={styles.groupActiveBadgeText}>ACTIVE</Text>
+                        </View>
                       )}
                     </TouchableOpacity>
                   ))
+                )
+              )}
+
+              {/* ── Divider ── */}
+              <View style={styles.divider} />
+
+              {/* ── STEALTH CARD ── */}
+              <View style={[styles.stealthCard, isDark && styles.stealthCardDark]}>
+                <View style={styles.stealthTop}>
+                  <Animated.View style={[styles.stealthDot, {
+                    backgroundColor: isDark ? C.red : C.green,
+                    opacity: isDark ? 1 : livePulse,
+                  }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.stealthStatus, { color: isDark ? C.red : C.green }]}>
+                      {isDark ? 'STEALTH ACTIVE' : 'BROADCASTING LIVE'}
+                    </Text>
+                    <Text style={styles.stealthSub}>
+                      {isEnforced
+                        ? 'Tracking enforced by crew owner'
+                        : isDark
+                          ? 'Your location is hidden from crew'
+                          : 'Your location is visible to crew'}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[styles.stealthBtn, isDark && styles.stealthBtnActive, (isEnforced || darkLoading) && { opacity: 0.45 }]}
+                  onPress={handleGoDark}
+                  disabled={isEnforced || darkLoading}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name={isDark ? 'radio' : 'eye-off'}
+                    size={15}
+                    color={isDark ? '#000' : C.red}
+                  />
+                  <Text style={[styles.stealthBtnText, isDark && styles.stealthBtnTextActive]}>
+                    {darkLoading ? 'SYNCING...' : isEnforced ? 'TRACKING ENFORCED' : isDark ? 'GO LIVE' : 'GO DARK / STEALTH'}
+                  </Text>
+                </TouchableOpacity>
+
+                {activeGroup?.invite_code && (
+                  <TouchableOpacity style={styles.inviteRow} onPress={handleShareInvite} activeOpacity={0.8}>
+                    <Text style={styles.inviteLabel}>INVITE CODE</Text>
+                    <Text style={styles.inviteCode}>{activeGroup.invite_code}</Text>
+                    <Ionicons name="share-social-outline" size={14} color="rgba(255,255,255,0.35)" />
+                  </TouchableOpacity>
                 )}
-              </>
-            )}
-
-            {/* ── Controls strip ── */}
-            <View style={styles.divider} />
-
-            {/* Go Dark / Go Live button */}
-            <View style={styles.goDarkBlock}>
-              {/* Status row */}
-              <View style={styles.goDarkStatus}>
-                <View style={[
-                  styles.goDarkDot,
-                  { backgroundColor: isDark ? '#ef4444' : '#22c55e' },
-                ]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.goDarkStatusLabel, isDark && styles.goDarkStatusLabelDark]}>
-                    {isDark ? 'STEALTH ACTIVE' : 'BROADCASTING LIVE'}
-                  </Text>
-                  <Text style={styles.goDarkStatusSub}>
-                    {isEnforced
-                      ? 'Tracking enforced by crew owner'
-                      : isDark
-                        ? 'Location hidden from crew'
-                        : 'Location visible to crew'}
-                  </Text>
-                </View>
               </View>
 
-              {/* Main button */}
-              <TouchableOpacity
-                style={[
-                  styles.goDarkBtn,
-                  isDark && styles.goDarkBtnActive,
-                  (isEnforced || darkLoading) && styles.goDarkBtnDisabled,
-                ]}
-                onPress={handleGoDark}
-                disabled={isEnforced || darkLoading}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.goDarkBtnText, isDark && styles.goDarkBtnTextActive]}>
-                  {darkLoading
-                    ? 'SYNCING...'
-                    : isEnforced
-                      ? 'TRACKING ENFORCED'
-                      : isDark
-                        ? '⚡ GO LIVE'
-                        : '🌑 GO DARK'}
-                </Text>
+              {/* ── QUICK ACTION GRID ── */}
+              <Text style={styles.sectionHeader}>QUICK ACTIONS</Text>
+              <View style={styles.actionGrid}>
+                {/* Place Marker */}
+                <TouchableOpacity
+                  style={[styles.actionTile, !activeGroup && styles.actionTileDisabled]}
+                  onPress={() => {
+                    if (!activeGroupId) { Alert.alert('NO ACTIVE CREW', 'Select a crew first.'); return; }
+                    setMarkerModal(true);
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <View style={styles.actionIcon}>
+                    <Ionicons name="pin" size={22} color={C.green} />
+                  </View>
+                  <Text style={styles.actionLabel}>MARK</Text>
+                </TouchableOpacity>
+
+                {/* Place Zone */}
+                <TouchableOpacity
+                  style={[styles.actionTile, !activeGroup && styles.actionTileDisabled]}
+                  onPress={() => {
+                    if (!activeGroupId) { Alert.alert('NO ACTIVE CREW', 'Select a crew first.'); return; }
+                    setZoneModal(true);
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <View style={styles.actionIcon}>
+                    <Ionicons name="scan" size={22} color={C.green} />
+                  </View>
+                  <Text style={styles.actionLabel}>ZONE</Text>
+                </TouchableOpacity>
+
+                {/* Invite */}
+                <TouchableOpacity
+                  style={[styles.actionTile, !activeGroup && styles.actionTileDisabled]}
+                  onPress={handleShareInvite}
+                  activeOpacity={0.75}
+                  disabled={!activeGroup}
+                >
+                  <View style={styles.actionIcon}>
+                    <Ionicons name="share-social" size={22} color={C.green} />
+                  </View>
+                  <Text style={styles.actionLabel}>INVITE</Text>
+                </TouchableOpacity>
+
+                {/* Settings */}
+                <TouchableOpacity
+                  style={styles.actionTile}
+                  onPress={() => { sheetRef.current?.snapToIndex(0); router.push('/(tabs)/settings'); }}
+                  activeOpacity={0.75}
+                >
+                  <View style={styles.actionIcon}>
+                    <Ionicons name="settings" size={22} color={C.green} />
+                  </View>
+                  <Text style={styles.actionLabel}>SETTINGS</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ height: 48 }} />
+            </BottomSheetScrollView>
+          </>
+        )}
+      </BottomSheet>
+
+      {/* ── MARKER PICKER MODAL ── */}
+      <Modal visible={markerModal} transparent animationType="slide" onRequestClose={() => setMarkerModal(false)}>
+        <View style={mod.backdrop}>
+          <BlurView intensity={95} tint="dark" style={mod.sheet}>
+            <View style={mod.handle}><View style={mod.handleBar} /></View>
+            <Text style={[mod.title, { color: C.green }]}>PLACE TACTICAL MARKER</Text>
+            <Text style={mod.sub}>Choose the type of intel to drop on the map.</Text>
+            <View style={mod.grid}>
+              {MARKER_TYPES.map((cfg) => {
+                const iconName = MARKER_ICONS[cfg.type] ?? 'pin';
+                const color    = MARKER_COLORS[cfg.type] ?? C.green;
+                return (
+                  <TouchableOpacity
+                    key={cfg.type}
+                    style={mod.tile}
+                    onPress={() => handleSelectMarkerType(cfg.type)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={[mod.tileIcon, { borderColor: color + '55', backgroundColor: color + '18' }]}>
+                      <Ionicons name={iconName} size={22} color={color} />
+                    </View>
+                    <Text style={mod.tileLabel}>{cfg.label.toUpperCase()}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity style={mod.cancelBtn} onPress={() => setMarkerModal(false)} activeOpacity={0.8}>
+              <Text style={mod.cancelText}>CANCEL</Text>
+            </TouchableOpacity>
+          </BlurView>
+        </View>
+      </Modal>
+
+      {/* ── ZONE PICKER MODAL ── */}
+      <Modal visible={zoneModal} transparent animationType="slide" onRequestClose={() => setZoneModal(false)}>
+        <View style={mod.backdrop}>
+          <BlurView intensity={95} tint="dark" style={[mod.sheet, { minHeight: 280 }]}>
+            <View style={mod.handle}><View style={mod.handleBar} /></View>
+            <Text style={[mod.title, { color: C.green }]}>CREATE ZONE</Text>
+            <Text style={mod.sub}>Choose the zone shape.</Text>
+            <View style={mod.zoneRow}>
+              {/* Circle */}
+              <TouchableOpacity style={mod.zoneTile} onPress={() => handleSelectZoneType('circle')} activeOpacity={0.8}>
+                <View style={[mod.tileIcon, { borderColor: C.greenBorder, backgroundColor: C.greenDim }]}>
+                  <Ionicons name="radio-button-on" size={26} color={C.green} />
+                </View>
+                <Text style={mod.tileLabel}>CIRCLE</Text>
+                <Text style={mod.zoneSub}>Tap to set center</Text>
+              </TouchableOpacity>
+              {/* Polygon */}
+              <TouchableOpacity style={mod.zoneTile} onPress={() => handleSelectZoneType('polygon')} activeOpacity={0.8}>
+                <View style={[mod.tileIcon, { borderColor: C.greenBorder, backgroundColor: C.greenDim }]}>
+                  <Ionicons name="git-network" size={26} color={C.green} />
+                </View>
+                <Text style={mod.tileLabel}>POLYGON</Text>
+                <Text style={mod.zoneSub}>Tap points to draw</Text>
               </TouchableOpacity>
             </View>
-
-            {/* Place marker CTA */}
-            <TouchableOpacity
-              style={[styles.placeMarkerBtn, !activeGroup && styles.placeMarkerBtnDisabled]}
-              onPress={handleOpenMarkerPicker}
-              activeOpacity={0.8}
-              disabled={!activeGroup}
-            >
-              <Text style={styles.placeMarkerIcon}>📍</Text>
-              <Text style={[styles.placeMarkerLabel, !activeGroup && styles.placeMarkerLabelDisabled]}>
-                PLACE MARKER
-              </Text>
+            <TouchableOpacity style={mod.cancelBtn} onPress={() => setZoneModal(false)} activeOpacity={0.8}>
+              <Text style={mod.cancelText}>CANCEL</Text>
             </TouchableOpacity>
-
-            {/* Place zone CTA */}
-            <TouchableOpacity
-              style={[styles.placeZoneBtn, !activeGroup && styles.placeMarkerBtnDisabled]}
-              onPress={handleOpenZonePicker}
-              activeOpacity={0.8}
-              disabled={!activeGroup}
-            >
-              <Text style={styles.placeMarkerIcon}>🎯</Text>
-              <Text style={[styles.placeZoneLabel, !activeGroup && styles.placeMarkerLabelDisabled]}>
-                PLACE ZONE
-              </Text>
-            </TouchableOpacity>
-
-            {/* Action buttons row */}
-            <View style={styles.actionRow}>
-              {/* Share invite */}
-              <TouchableOpacity
-                style={styles.actionBtn}
-                onPress={handleShareInvite}
-                activeOpacity={0.8}
-                disabled={!activeGroup}
-              >
-                <Text style={styles.actionBtnIcon}>🔗</Text>
-                <Text style={styles.actionBtnLabel}>INVITE</Text>
-              </TouchableOpacity>
-
-              {/* Sessions */}
-              <TouchableOpacity
-                style={[styles.actionBtn, activeSession && styles.actionBtnActive]}
-                onPress={handleOpenSessions}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.actionBtnIcon}>⚡</Text>
-                <Text style={[styles.actionBtnLabel, activeSession && styles.actionBtnLabelActive]}>
-                  {activeSession ? 'SESSION' : 'SESSIONS'}
-                </Text>
-              </TouchableOpacity>
-
-              {/* Settings */}
-              <TouchableOpacity
-                style={styles.actionBtn}
-                onPress={handleOpenSettings}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.actionBtnIcon}>⚙️</Text>
-                <Text style={styles.actionBtnLabel}>SETTINGS</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Invite code display */}
-            {activeGroup?.invite_code && (
-              <TouchableOpacity
-                style={styles.inviteCodeRow}
-                onPress={handleShareInvite}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.inviteCodeLabel}>INVITE CODE</Text>
-                <Text style={styles.inviteCode}>{activeGroup.invite_code}</Text>
-                <Text style={styles.inviteCodeCopy}>TAP TO COPY</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Bottom padding for safe area */}
-            <View style={{ height: 40 }} />
-          </BottomSheetScrollView>
-        </>
-      )}
-    </BottomSheet>
-
-    {/* ── Marker type picker modal ── */}
-    <Modal
-      visible={showMarkerModal}
-      transparent
-      animationType="slide"
-      onRequestClose={() => setShowMarkerModal(false)}
-    >
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalSheet}>
-          {/* Header */}
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>PLACE MARKER</Text>
-            <TouchableOpacity onPress={() => setShowMarkerModal(false)} activeOpacity={0.7}>
-              <Text style={styles.modalClose}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Type grid */}
-          <View style={styles.markerGrid}>
-            {MARKER_TYPES.map((cfg) => (
-              <TouchableOpacity
-                key={cfg.type}
-                style={styles.markerTile}
-                onPress={() => handleSelectMarkerType(cfg.type)}
-                activeOpacity={0.75}
-              >
-                <View style={[styles.markerTileIcon, { backgroundColor: `${cfg.color}22`, borderColor: `${cfg.color}55` }]}>
-                  <Text style={styles.markerTileEmoji}>{cfg.emoji}</Text>
-                </View>
-                <Text style={styles.markerTileLabel}>{cfg.label.toUpperCase()}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <View style={{ height: 24 }} />
+          </BlurView>
         </View>
-      </View>
-    </Modal>
-    {/* ── Zone type picker modal ── */}
-    <Modal
-      visible={showZoneModal}
-      transparent
-      animationType="slide"
-      onRequestClose={() => setShowZoneModal(false)}
-    >
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalSheet}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>PLACE ZONE</Text>
-            <TouchableOpacity onPress={() => setShowZoneModal(false)} activeOpacity={0.7}>
-              <Text style={styles.modalClose}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.zoneTileRow}>
-            <TouchableOpacity
-              style={styles.zoneTile}
-              onPress={() => handleSelectZoneType('circle')}
-              activeOpacity={0.75}
-            >
-              <View style={[styles.zoneTileIcon, { backgroundColor: 'rgba(34,197,94,0.12)', borderColor: 'rgba(34,197,94,0.3)' }]}>
-                <Text style={styles.zoneTileEmoji}>⭕</Text>
-              </View>
-              <Text style={styles.zoneTileLabel}>CIRCLE</Text>
-              <Text style={styles.zoneTileSub}>Tap to set center & radius</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.zoneTile}
-              onPress={() => handleSelectZoneType('polygon')}
-              activeOpacity={0.75}
-            >
-              <View style={[styles.zoneTileIcon, { backgroundColor: 'rgba(34,197,94,0.12)', borderColor: 'rgba(34,197,94,0.3)' }]}>
-                <Text style={styles.zoneTileEmoji}>📐</Text>
-              </View>
-              <Text style={styles.zoneTileLabel}>POLYGON</Text>
-              <Text style={styles.zoneTileSub}>Tap points to draw shape</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={{ height: 32 }} />
-        </View>
-      </View>
-    </Modal>
+      </Modal>
     </>
   );
 };
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  // Sheet
-  sheetBg: {
-    backgroundColor: '#0f0f17',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderColor: '#2a2a3a',
+  glass: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
-  handleIndicator: {
-    backgroundColor: '#3a3a4e',
-    width: 40,
-    height: 4,
-  },
+  handle: { height: 26, alignItems: 'center', justifyContent: 'center' },
+  handleBar: { width: 38, height: 4, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
 
-  // Collapsed peek row
-  peekRow: {
+  // Collapsed peek
+  peek: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 10,
-    height: COLLAPSED_H - 24,
+    paddingVertical: 14,
+    gap: 12,
   },
-  peekGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
+  peekLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  peekDot:  { width: 9, height: 9, borderRadius: 5 },
+  peekCrew: { color: C.textPrimary, fontSize: 17, fontWeight: '900', letterSpacing: 0.3 },
+  peekSub:  { color: C.green, fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginTop: 1 },
+  peekToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderWidth: 1, borderColor: C.greenBorder,
+    backgroundColor: C.greenDim, borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 8,
   },
-  peekDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
-  },
-  peekGroupName: {
-    color: '#e8e8f0',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-    flex: 1,
-  },
-  peekBadge: {
-    backgroundColor: 'rgba(34,197,94,0.15)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: '#22c55e',
-  },
-  peekBadgeText: {
-    color: '#22c55e',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  peekToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: 'rgba(34,197,94,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.25)',
-    minWidth: 68,
-  },
-  peekToggleRowDark: {
-    backgroundColor: 'rgba(239,68,68,0.12)',
-    borderColor: 'rgba(239,68,68,0.35)',
-  },
-  peekToggleLabel: {
-    color: '#22c55e',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  peekToggleLabelDark: {
-    color: '#ef4444',
-  },
+  peekToggleDark: { borderColor: C.redBorder, backgroundColor: C.redDim },
+  peekToggleText: { fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
 
   // Tab bar
   tabBar: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: '#2a2a3a',
-    paddingHorizontal: 16,
-    marginTop: 4,
-  },
-  tab: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginRight: 4,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: {
-    borderBottomColor: '#22c55e',
-  },
-  tabText: {
-    color: '#8888aa',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-  },
-  tabTextActive: {
-    color: '#22c55e',
-  },
-
-  // Scroll
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-
-  // Member row
-  memberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1a1a24',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  memberInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  memberName: {
-    color: '#e8e8f0',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  memberRole: {
-    color: '#8888aa',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  memberMeta: {
-    alignItems: 'flex-end',
-    gap: 3,
-  },
-  batteryText: {
-    color: '#8888aa',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  lastSeen: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-
-  // Groups tab
-  groupRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    marginBottom: 6,
-    backgroundColor: '#12121a',
-    borderWidth: 1,
-    borderColor: '#1e1e28',
-    gap: 10,
-  },
-  groupRowActive: {
-    backgroundColor: 'rgba(34,197,94,0.06)',
-    borderColor: 'rgba(34,197,94,0.3)',
-  },
-  groupActiveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#22c55e',
-  },
-  groupRowInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  groupRowName: {
-    color: '#a0a0b8',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-  },
-  groupRowNameActive: {
-    color: '#e8e8f0',
-  },
-  groupRowType: {
-    color: '#4a4a60',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  groupActiveLabel: {
-    color: '#22c55e',
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-  },
-
-  // Controls
-  divider: {
-    height: 1,
-    backgroundColor: '#2a2a3a',
-    marginVertical: 16,
-  },
-  controlRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 4,
-    marginBottom: 8,
-  },
-  controlInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  controlDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  controlLabel: {
-    color: '#e8e8f0',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1,
-  },
-  controlSubLabel: {
-    color: '#8888aa',
-    fontSize: 10,
-    fontWeight: '500',
-    marginTop: 1,
-  },
-
-  // Action buttons
-  actionRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
-  },
-  actionBtn: {
-    flex: 1,
-    backgroundColor: '#12121a',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    gap: 4,
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
-  },
-  actionBtnActive: {
-    backgroundColor: 'rgba(34,197,94,0.08)',
-    borderColor: 'rgba(34,197,94,0.35)',
-  },
-  actionBtnIcon: {
-    fontSize: 20,
-  },
-  actionBtnLabel: {
-    color: '#8888aa',
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-  },
-  actionBtnLabelActive: {
-    color: '#22c55e',
-  },
-
-  // Invite code
-  inviteCodeRow: {
-    backgroundColor: '#12121a',
-    borderRadius: 10,
-    padding: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
-    gap: 4,
-    marginBottom: 8,
-  },
-  inviteCodeLabel: {
-    color: '#8888aa',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-  },
-  inviteCode: {
-    color: '#4ADE80',
-    fontSize: 22,
-    fontWeight: '900',
-    letterSpacing: 6,
-    fontVariant: ['tabular-nums'],
-  },
-  inviteCodeCopy: {
-    color: '#4a4a60',
-    fontSize: 9,
-    fontWeight: '600',
-    letterSpacing: 1,
-  },
-
-  // Empty states
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 32,
-    gap: 6,
-  },
-  emptyIcon: {
-    fontSize: 32,
-    marginBottom: 4,
-  },
-  emptyText: {
-    color: '#e8e8f0',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  emptySubtext: {
-    color: '#8888aa',
-    fontSize: 12,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-
-  // Go Dark block
-  goDarkBlock: {
-    backgroundColor: '#0a0a0f',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
-    padding: 14,
-    gap: 12,
-    marginBottom: 10,
-  },
-  goDarkStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  goDarkDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  goDarkStatusLabel: {
-    color: '#22c55e',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-  },
-  goDarkStatusLabelDark: {
-    color: '#ef4444',
-  },
-  goDarkStatusSub: {
-    color: '#8888aa',
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 1,
-  },
-  goDarkBtn: {
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    backgroundColor: 'rgba(34,197,94,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.3)',
-  },
-  goDarkBtnActive: {
-    backgroundColor: '#ef4444',
-    borderColor: '#ef4444',
-  },
-  goDarkBtnDisabled: {
-    backgroundColor: '#1a1a24',
-    borderColor: '#2a2a3a',
-    opacity: 0.6,
-  },
-  goDarkBtnText: {
-    color: '#22c55e',
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 1.5,
-  },
-  goDarkBtnTextActive: {
-    color: '#ffffff',
-  },
-
-  // Place marker button
-  placeMarkerBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(74,222,128,0.08)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.3)',
-    paddingVertical: 13,
-    gap: 8,
-    marginBottom: 10,
-  },
-  placeMarkerBtnDisabled: {
-    backgroundColor: 'rgba(42,42,58,0.5)',
-    borderColor: '#2a2a3a',
-  },
-  placeMarkerIcon: {
-    fontSize: 18,
-  },
-  placeMarkerLabel: {
-    color: '#4ADE80',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-  },
-  placeMarkerLabelDisabled: {
-    color: '#4a4a60',
-  },
-
-  // Marker picker modal
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    backgroundColor: '#0f0f17',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderTopWidth: 1,
-    borderColor: '#2a2a3a',
-    paddingTop: 8,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    borderBottomColor: 'rgba(255,255,255,0.08)',
     paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1e1e2a',
   },
-  modalTitle: {
-    color: '#e8e8f0',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
-  modalClose: {
-    color: '#8888aa',
-    fontSize: 18,
-    fontWeight: '600',
-    paddingHorizontal: 4,
-  },
-  markerGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: 12,
-    gap: 10,
-  },
-  markerTile: {
-    width: '30%',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#12121a',
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
-    gap: 6,
-  },
-  markerTileIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  markerTileEmoji: {
-    fontSize: 22,
-  },
-  markerTileLabel: {
-    color: '#8888aa',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1,
-    textAlign: 'center',
-  },
+  tabItem: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabItemActive: { borderBottomColor: C.green },
+  tabText: { color: 'rgba(255,255,255,0.35)', fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
+  tabTextActive: { color: C.green },
 
-  // Place zone button
-  placeZoneBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(59,130,246,0.08)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.3)',
-    paddingVertical: 13,
-    gap: 8,
-    marginBottom: 10,
-  },
-  placeZoneLabel: {
-    color: '#60a5fa',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-  },
+  scroll: { paddingBottom: 20 },
 
-  // Zone type picker
-  zoneTileRow: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 12,
+  // Empty state
+  empty: { alignItems: 'center', paddingVertical: 40, gap: 10 },
+  emptyTitle: { color: 'rgba(255,255,255,0.35)', fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
+  emptySub:   { color: 'rgba(255,255,255,0.25)', fontSize: 12, fontWeight: '500', textAlign: 'center', paddingHorizontal: 32 },
+
+  // Group rows
+  groupRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)',
   },
-  zoneTile: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 20,
-    borderRadius: 14,
-    backgroundColor: '#12121a',
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
-    gap: 8,
+  groupRowActive: { backgroundColor: C.greenDim },
+  groupRowLeft:   { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  groupActiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.green },
+  groupName:      { color: 'rgba(255,255,255,0.6)', fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
+  groupNameActive:{ color: C.textPrimary },
+  groupMeta:      { color: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: '700', letterSpacing: 1, marginTop: 2 },
+  groupActiveBadge: { backgroundColor: C.greenDim, borderWidth: 1, borderColor: C.greenBorder, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  groupActiveBadgeText: { color: C.green, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+
+  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.07)', marginVertical: 20, marginHorizontal: 20 },
+
+  // Stealth card
+  stealthCard: {
+    marginHorizontal: 16, borderRadius: 20, borderWidth: 1,
+    borderColor: C.greenBorder, backgroundColor: C.greenDim,
+    padding: 16, gap: 12,
   },
-  zoneTileIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    marginBottom: 4,
+  stealthCardDark: { borderColor: C.redBorder, backgroundColor: C.redDim },
+  stealthTop:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  stealthDot:   { width: 9, height: 9, borderRadius: 5 },
+  stealthStatus:{ fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
+  stealthSub:   { color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: '600', marginTop: 2 },
+  stealthBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1, borderColor: C.redBorder, backgroundColor: C.redDim,
+    borderRadius: 14, paddingVertical: 13,
   },
-  zoneTileEmoji: {
-    fontSize: 26,
+  stealthBtnActive: { backgroundColor: C.green, borderColor: C.green },
+  stealthBtnText:   { color: C.red, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
+  stealthBtnTextActive: { color: '#000' },
+
+  // Invite row
+  inviteRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
+  inviteLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 9, fontWeight: '900', letterSpacing: 1.2 },
+  inviteCode:  { flex: 1, color: C.green, fontSize: 14, fontWeight: '900', letterSpacing: 2 },
+
+  // Section header
+  sectionHeader: { color: 'rgba(255,255,255,0.35)', fontSize: 9, fontWeight: '900', letterSpacing: 1.6, marginTop: 24, marginBottom: 14, marginHorizontal: 20 },
+
+  // Quick action grid
+  actionGrid: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 16 },
+  actionTile: { alignItems: 'center', gap: 6 },
+  actionTileDisabled: { opacity: 0.4 },
+  actionIcon: {
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: C.surface,
+    borderWidth: 1, borderColor: C.border,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 2,
   },
-  zoneTileLabel: {
-    color: '#e8e8f0',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-  },
-  zoneTileSub: {
-    color: '#8888aa',
-    fontSize: 10,
-    fontWeight: '500',
-    textAlign: 'center',
-    paddingHorizontal: 8,
-  },
+  actionLabel: { color: C.textPrimary, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+});
+
+// ─── Modal styles ─────────────────────────────────────────────────────────────
+const mod = StyleSheet.create({
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.65)' },
+  sheet:    { borderTopLeftRadius: 32, borderTopRightRadius: 32, padding: 24, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  handle:   { alignItems: 'center', marginBottom: 16 },
+  handleBar:{ width: 40, height: 4, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
+  title:    { fontSize: 16, fontWeight: '900', letterSpacing: 1.5, marginBottom: 6 },
+  sub:      { color: 'rgba(255,255,255,0.45)', fontSize: 12, fontWeight: '600', marginBottom: 20 },
+  grid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  zoneRow:  { flexDirection: 'row', gap: 12 },
+  tile:     { width: '30.5%', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', padding: 12, gap: 6 },
+  zoneTile: { flex: 1, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', padding: 16, gap: 8 },
+  tileIcon: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  tileLabel:{ color: C.textPrimary, fontSize: 10, fontWeight: '900', letterSpacing: 0.8, textAlign: 'center' },
+  zoneSub:  { color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: '600', textAlign: 'center' },
+  cancelBtn:{ marginTop: 20, alignItems: 'center', paddingVertical: 14 },
+  cancelText:{ color: C.red, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
 });

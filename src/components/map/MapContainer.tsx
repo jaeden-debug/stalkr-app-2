@@ -20,6 +20,7 @@ import { MapControls } from './MapControls';
 
 export const MapContainer: React.FC = () => {
   const mapRef = useRef<MapView>(null);
+  const hasAutocentered = useRef(false);
 
   const isSatellite = useMapStore((s) => s.isSatellite);
   const centerTrigger = useMapStore((s) => s.centerTrigger);
@@ -27,6 +28,22 @@ export const MapContainer: React.FC = () => {
   const userId = useAuthStore((s) => s.user?.id);
   const polygonDraftPoints = useMapStore((s) => s.polygonDraftPoints);
   const placingPolygonZone = useMapStore((s) => s.placingPolygonZone);
+
+  // Auto-center once on first GPS fix
+  useEffect(() => {
+    if (myLocation && !hasAutocentered.current) {
+      hasAutocentered.current = true;
+      mapRef.current?.animateToRegion(
+        {
+          latitude: myLocation.latitude,
+          longitude: myLocation.longitude,
+          latitudeDelta: MAP_CONSTANTS.INITIAL_ZOOM.latitudeDelta,
+          longitudeDelta: MAP_CONSTANTS.INITIAL_ZOOM.longitudeDelta,
+        },
+        800,
+      );
+    }
+  }, [myLocation]);
 
   useEffect(() => {
     if (centerTrigger > 0 && myLocation) {

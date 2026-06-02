@@ -1,28 +1,46 @@
-import React, { useEffect, useState } from 'react';
+/**
+ * Sessions — personal journey sharing + group session tracking.
+ *
+ * Flow:
+ *   1. Tap "+ New Journey"
+ *   2. Enter destination name (text — coordinates resolved via Google Places on native,
+ *      or stored as-is for display if no geocode available)
+ *   3. Pick watchers from group members (optional)
+ *   4. Tap Start → session created, share sheet opens with watch link
+ *   5. Active journey banner shows at top with a "Share Link" and "End" button
+ *   6. Arrival detected automatically → session marked arrived, watchers notified
+ */
+import React, { useEffect, useState, useCallback } from 'react';
 import {
+  Alert,
   FlatList,
+  Platform,
   RefreshControl,
   SafeAreaView,
   Share,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { Sheet } from '@/components/ui/Sheet';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { Avatar } from '@/components/ui/Avatar';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { Sheet } from '@/components/ui/Sheet';
 import { useToast } from '@/components/ui/Toast';
+import { buildWatchUrl } from '@/services/sessions';
+import { getCrewColor } from '@/constants/map';
 import type { Session } from '@/types/models';
 
 function timeAgo(iso: string | null): string {
-  if (!iso) return 'unknown';
+  if (!iso) return '—';
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
   if (m < 1) return 'just now';
@@ -33,42 +51,99 @@ function timeAgo(iso: string | null): string {
 }
 
 export default function SessionsScreen() {
-  const router = useRouter();
   const toast = useToast();
-  const { sessions, isLoading, loadGroupSessions, createSession, endSession, joinSessionByCode } = useSessionStore();
-  const { activeGroup } = useGroupStore();
+  const {
+    sessions, isLoading, activeJourneySession,
+    loadGroupSessions, loadMyJourneySession,
+    createSession, endSession, markArrived, joinSessionByCode,
+  } = useSessionStore();
+  const { activeGroup, groupMembers } = useGroupStore();
   const userId = useAuthStore((s) => s.user?.id);
+  const profile = useAuthStore((s) => s.profile);
 
-  const [showCreateSheet, setShowCreateSheet] = useState(false);
-  const [showJoinSheet, setShowJoinSheet] = useState(false);
+  // Create sheet state
+  const [showCreate, setShowCreate] = useState(false);
   const [sessionName, setSessionName] = useState('');
-  const [joinCode, setJoinCode] = useState('');
+  const [destination, setDestination] = useState('');
+  const [selectedWatchers, setSelectedWatchers] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
+
+  // Join sheet state
+  const [showJoin, setShowJoin] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
   const [joining, setJoining] = useState(false);
 
   useEffect(() => {
     if (activeGroup?.id) loadGroupSessions(activeGroup.id);
+    loadMyJourneySession();
   }, [activeGroup?.id]);
 
-  const handleCreate = async () => {
-    if (!activeGroup) { toast.error('Select an active group first'); return; }
-    if (!sessionName.trim()) { toast.error('Enter a session name'); return; }
-    setCreating(true);
-    const session = await createSession(activeGroup.id, sessionName.trim());
-    setCreating(false);
-    if (session) {
-      setShowCreateSheet(false);
-      setSessionName('');
-      toast.success(`Session "${session.name}" started`);
-    } else {
-      toast.error('Failed to create session');
-    }
+  const otherMembers = groupMembers.filter((m) => m.user_id !== userId);
+
+  const toggleWatcher = (uid: string) => {
+    setSelectedWatchers((prev) => {
+      const next = new Set(prev);
+      next.has(uid) ? next.delete(uid) : next.add(uid);
+      return next;
+    });
   };
 
-  const handleEndSession = async (sessionId: string) => {
-    const ok = await endSession(sessionId);
-    if (ok) toast.success('Session ended');
-    else toast.error('Failed to end session');
+  const handleCreate = async () => {
+    if (!sessionName.trim()) { toast.error('Enter a journey name'); return; }
+    setCreating(true);
+
+    const watchers = otherMembers
+      .filter((m) => selectedWatchers.has(m.user_id))
+      .map((m) => ({ userId: m.user_id, pushToken: m.profile?.push_token ?? null }));
+
+    const session = await createSession({
+      name: sessionName.trim(),
+      groupId: activeGroup?.id ?? null,
+      destinationName: destination.trim() || undefined,
+      notifyOnEnd: true,
+      watchers,
+    });
+
+    setCreating(false);
+
+    if (!session) { toast.error('Failed to start journey'); return; }
+
+    setShowCreate(false);
+    setSessionName('');
+    setDestination('');
+    setSelectedWatchers(new Set());
+
+    // Auto-open share sheet
+    await handleShareLink(session);
+  };
+
+  const handleShareLink = async (session: Session) => {
+    const url = buildWatchUrl(session.watch_token);
+    const destText = session.destination_name ? ` to ${session.destination_name}` : '';
+    try {
+      await Share.share({
+        title: `Watch my journey${destText}`,
+        message: `${session.traveler_name ?? 'Someone'} is on their way${destText}. Follow live: ${url}`,
+        url,
+      });
+    } catch { /* user cancelled */ }
+  };
+
+  const handleEnd = (sessionId: string, sessionName: string) => {
+    Alert.alert('End Journey', `End "${sessionName}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'End', style: 'destructive', onPress: async () => {
+        const ok = await endSession(sessionId);
+        if (ok) toast.success('Journey ended');
+        else toast.error('Failed to end journey');
+      }},
+    ]);
+  };
+
+  const handleMarkArrived = async (sessionId: string) => {
+    const ok = await markArrived(sessionId);
+    if (ok) toast.success('✅ Marked as arrived');
+    else toast.error('Failed to mark arrived');
   };
 
   const handleJoin = async () => {
@@ -77,153 +152,234 @@ export default function SessionsScreen() {
     const session = await joinSessionByCode(joinCode.trim().toUpperCase());
     setJoining(false);
     if (session) {
-      setShowJoinSheet(false);
+      setShowJoin(false);
       setJoinCode('');
-      toast.success(`Joined session "${session.name}"`);
+      toast.success(`Joined "${session.name}"`);
     } else {
       toast.error('Invalid or expired invite code');
     }
   };
 
-  const handleShareInviteCode = async (item: Session) => {
-    if (!item.invite_code) return;
-    try {
-      await Share.share({
-        title: `Join session: ${item.name}`,
-        message: `Join my Stalkr session "${item.name}" with code: ${item.invite_code}`,
-      });
-    } catch {
-      // user cancelled
-    }
+  const resetCreate = () => {
+    setShowCreate(false);
+    setSessionName('');
+    setDestination('');
+    setSelectedWatchers(new Set());
   };
 
   const renderSession = ({ item }: { item: Session }) => {
-    const isOwner = (item as any).created_by === userId;
+    const isOwner = item.created_by === userId;
+    const isActive = item.is_active;
+    const arrived = item.status === 'arrived';
+
     return (
-      <View style={styles.sessionCard}>
-        <View style={styles.sessionHeader}>
-          <Text style={styles.sessionName}>{item.name}</Text>
+      <View style={[styles.card, arrived && styles.cardArrived]}>
+        <View style={styles.cardHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardName}>{item.name}</Text>
+            {item.destination_name && (
+              <Text style={styles.cardDest}>📍 {item.destination_name}</Text>
+            )}
+          </View>
           <Badge
-            label={item.is_active ? 'Active' : 'Ended'}
-            variant={item.is_active ? 'live' : 'offline'}
-            dot
+            label={arrived ? 'Arrived' : isActive ? 'Active' : 'Ended'}
+            variant={arrived ? 'live' : isActive ? 'live' : 'offline'}
+            dot={isActive}
           />
         </View>
-        <Text style={styles.sessionMeta}>
-          Started {timeAgo(item.started_at)}
-          {item.destination_name ? ` • To: ${item.destination_name}` : ''}
+
+        <Text style={styles.cardMeta}>
+          {arrived
+            ? `✅ Arrived ${timeAgo(item.arrived_at)}`
+            : isActive
+            ? `Started ${timeAgo(item.started_at)}`
+            : `Ended ${timeAgo(item.ended_at)}`}
         </Text>
-        {/* Invite code row for owners with active sessions */}
-        {item.is_active && isOwner && item.invite_code && (
-          <TouchableOpacity
-            style={styles.inviteRow}
-            onPress={() => handleShareInviteCode(item)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.inviteCodeLabel}>CODE: </Text>
-            <Text style={styles.inviteCodeText}>{item.invite_code}</Text>
-            <Text style={styles.inviteShareHint}>  TAP TO SHARE</Text>
-          </TouchableOpacity>
-        )}
-        {item.is_active && (
-          <TouchableOpacity
-            style={styles.endBtn}
-            onPress={() => handleEndSession(item.id)}
-          >
-            <Text style={styles.endBtnText}>End Session</Text>
-          </TouchableOpacity>
+
+        {isActive && isOwner && (
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              style={styles.shareBtn}
+              onPress={() => handleShareLink(item)}
+            >
+              <Text style={styles.shareBtnText}>🔗  Share Link</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.arrivedBtn}
+              onPress={() => handleMarkArrived(item.id)}
+            >
+              <Text style={styles.arrivedBtnText}>✅  I Arrived</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.endBtn}
+              onPress={() => handleEnd(item.id, item.name)}
+            >
+              <Text style={styles.endBtnText}>End</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
     );
   };
 
+  const allSessions = [
+    ...(activeJourneySession && !sessions.find((s) => s.id === activeJourneySession.id)
+      ? [activeJourneySession]
+      : []),
+    ...sessions,
+  ];
+
   return (
     <SafeAreaView style={styles.root}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Sessions</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={styles.joinBtn}
-            onPress={() => setShowJoinSheet(true)}
-          >
+        <Text style={styles.title}>JOURNEYS</Text>
+        <View style={styles.headerBtns}>
+          <TouchableOpacity style={styles.joinBtn} onPress={() => setShowJoin(true)}>
             <Text style={styles.joinBtnText}>Join</Text>
           </TouchableOpacity>
-          {activeGroup && (
-            <TouchableOpacity
-              style={styles.createBtn}
-              onPress={() => setShowCreateSheet(true)}
-            >
-              <Text style={styles.createBtnText}>+ New</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity style={styles.createBtn} onPress={() => setShowCreate(true)}>
+            <Text style={styles.createBtnText}>+ New</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
-      {!activeGroup ? (
-        <EmptyState
-          emoji="👥"
-          title="No active group"
-          subtitle="Select a group on the Crew tab to manage sessions."
-        />
-      ) : (
-        <FlatList
-          data={sessions}
-          keyExtractor={(s) => s.id}
-          renderItem={renderSession}
-          contentContainerStyle={sessions.length === 0 ? styles.emptyList : styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={isLoading}
-              onRefresh={() => loadGroupSessions(activeGroup.id)}
-              tintColor="#22c55e"
-            />
-          }
-          ListEmptyComponent={
-            !isLoading ? (
-              <EmptyState
-                emoji="⚡"
-                title="No sessions"
-                subtitle="Start a session to track movement and share with your crew."
-                action={{ label: 'Start Session', onPress: () => setShowCreateSheet(true) }}
-              />
-            ) : null
-          }
-        />
+      {/* Active journey banner */}
+      {activeJourneySession && (
+        <View style={styles.activeBanner}>
+          <View style={styles.activeDot} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.activeBannerTitle}>{activeJourneySession.name}</Text>
+            {activeJourneySession.destination_name && (
+              <Text style={styles.activeBannerDest}>→ {activeJourneySession.destination_name}</Text>
+            )}
+          </View>
+          <TouchableOpacity
+            style={styles.activeBannerShare}
+            onPress={() => handleShareLink(activeJourneySession)}
+          >
+            <Text style={styles.activeBannerShareText}>Share</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
+      <FlatList
+        data={allSessions}
+        keyExtractor={(s) => s.id}
+        renderItem={renderSession}
+        contentContainerStyle={allSessions.length === 0 ? styles.emptyList : styles.list}
+        refreshControl={
+          <RefreshControl
+            refreshing={isLoading}
+            onRefresh={() => {
+              if (activeGroup?.id) loadGroupSessions(activeGroup.id);
+              loadMyJourneySession();
+            }}
+            tintColor="#22c55e"
+          />
+        }
+        ListEmptyComponent={
+          !isLoading ? (
+            <EmptyState
+              emoji="🚗"
+              title="No journeys yet"
+              subtitle="Start a journey to share your live location with anyone — no app required."
+              action={{ label: 'Start Journey', onPress: () => setShowCreate(true) }}
+            />
+          ) : null
+        }
+      />
+
+      {/* ── Create Journey Sheet ───────────────────────────────── */}
       <Sheet
-        visible={showCreateSheet}
-        onClose={() => { setShowCreateSheet(false); setSessionName(''); }}
-        title="New Session"
-        snapHeight={320}
+        visible={showCreate}
+        onClose={resetCreate}
+        title="New Journey"
+        snapHeight={otherMembers.length > 0 ? 580 : 380}
       >
-        <View style={styles.sheetContent}>
-          <Text style={styles.sheetHint}>Active group: {activeGroup?.name ?? '—'}</Text>
+        <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
           <TextInput
-            style={styles.sheetInput}
-            placeholder="Session name (e.g. Morning Hunt)"
+            style={styles.input}
+            placeholder="Journey name (e.g. Heading home)"
             placeholderTextColor="#5555aa"
             value={sessionName}
             onChangeText={setSessionName}
             autoFocus
-            returnKeyType="done"
-            onSubmitEditing={handleCreate}
+            returnKeyType="next"
             selectionColor="#22c55e"
           />
-          <Button label="Start Session" onPress={handleCreate} loading={creating} fullWidth size="lg" />
-        </View>
+          <TextInput
+            style={styles.input}
+            placeholder="Destination (optional, e.g. 123 Main St)"
+            placeholderTextColor="#5555aa"
+            value={destination}
+            onChangeText={setDestination}
+            returnKeyType="done"
+            selectionColor="#22c55e"
+          />
+
+          {otherMembers.length > 0 && (
+            <>
+              <Text style={styles.sectionLabel}>NOTIFY CREW MEMBERS</Text>
+              {otherMembers.map((m) => {
+                const name = m.nickname_override ?? m.profile?.nickname ?? m.profile?.display_name ?? 'Member';
+                const initials = m.initials_override ?? m.profile?.initials ?? name.slice(0, 2).toUpperCase();
+                const selected = selectedWatchers.has(m.user_id);
+                return (
+                  <TouchableOpacity
+                    key={m.user_id}
+                    style={[styles.watcherRow, selected && styles.watcherRowSelected]}
+                    onPress={() => toggleWatcher(m.user_id)}
+                    activeOpacity={0.75}
+                  >
+                    <Avatar
+                      uri={m.profile?.avatar_url}
+                      initials={initials}
+                      displayName={name}
+                      size={36}
+                      color={getCrewColor(m.user_id)}
+                    />
+                    <Text style={styles.watcherName}>{name}</Text>
+                    <Switch
+                      value={selected}
+                      onValueChange={() => toggleWatcher(m.user_id)}
+                      trackColor={{ false: '#2a2a3a', true: 'rgba(34,197,94,0.4)' }}
+                      thumbColor={selected ? '#22c55e' : '#6b7280'}
+                      ios_backgroundColor="#2a2a3a"
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+            </>
+          )}
+
+          <View style={styles.shareHint}>
+            <Text style={styles.shareHintText}>
+              📤 After starting, you'll get a share link — send it to anyone via iMessage, WhatsApp, or any app. They don't need Stalkr installed.
+            </Text>
+          </View>
+
+          <Button
+            label="Start & Share Link"
+            onPress={handleCreate}
+            loading={creating}
+            fullWidth
+            size="lg"
+          />
+        </ScrollView>
       </Sheet>
 
+      {/* ── Join Sheet ─────────────────────────────────────────── */}
       <Sheet
-        visible={showJoinSheet}
-        onClose={() => { setShowJoinSheet(false); setJoinCode(''); }}
+        visible={showJoin}
+        onClose={() => { setShowJoin(false); setJoinCode(''); }}
         title="Join Session"
-        snapHeight={280}
+        snapHeight={260}
       >
         <View style={styles.sheetContent}>
-          <Text style={styles.sheetHint}>Enter the invite code shared by the session host.</Text>
+          <Text style={styles.sheetHint}>Enter the invite code from the session host.</Text>
           <TextInput
-            style={[styles.sheetInput, { letterSpacing: 4, textAlign: 'center' }]}
+            style={[styles.input, { letterSpacing: 4, textAlign: 'center' }]}
             placeholder="ABCD1234"
             placeholderTextColor="#5555aa"
             value={joinCode}
@@ -243,76 +399,81 @@ export default function SessionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0f' },
+  root: { flex: 1, backgroundColor: '#080808' },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    paddingTop: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a3a',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 16,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)',
   },
-  title: { color: '#e8e8f0', fontSize: 24, fontWeight: '800' },
-  headerActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  title: { color: '#FFFFFF', fontSize: 22, fontWeight: '900', letterSpacing: 1.5 },
+  headerBtns: { flexDirection: 'row', gap: 8 },
   joinBtn: {
-    backgroundColor: '#1a1a24',
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999,
   },
-  joinBtnText: { color: '#e8e8f0', fontWeight: '600', fontSize: 14 },
-  createBtn: {
-    backgroundColor: '#22c55e',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 10,
+  joinBtnText: { color: 'rgba(255,255,255,0.8)', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
+  createBtn: { backgroundColor: '#4ADE80', paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999 },
+  createBtnText: { color: '#000', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
+
+  // Active banner
+  activeBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    margin: 14, backgroundColor: 'rgba(74,222,128,0.08)',
+    borderRadius: 18, padding: 14, borderWidth: 1, borderColor: 'rgba(74,222,128,0.3)',
   },
-  createBtnText: { color: '#000', fontWeight: '700', fontSize: 14 },
-  inviteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-    paddingVertical: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#2a2a3a',
+  activeDot: {
+    width: 10, height: 10, borderRadius: 5, backgroundColor: '#4ADE80',
+    shadowColor: '#4ADE80', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 8,
   },
-  inviteCodeLabel: { color: '#8888aa', fontSize: 11, fontWeight: '700' },
-  inviteCodeText: { color: '#4ADE80', fontSize: 14, fontWeight: '900', letterSpacing: 3 },
-  inviteShareHint: { color: '#5555aa', fontSize: 10 },
-  list: { padding: 16, gap: 12 },
+  activeBannerTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '900', letterSpacing: 0.3 },
+  activeBannerDest:  { color: 'rgba(255,255,255,0.5)', fontSize: 11, marginTop: 2 },
+  activeBannerShare: { backgroundColor: '#4ADE80', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999 },
+  activeBannerShareText: { color: '#000', fontWeight: '900', fontSize: 11, letterSpacing: 0.8 },
+
+  list:      { padding: 16, gap: 12 },
   emptyList: { flex: 1 },
-  sessionCard: {
-    backgroundColor: '#1a1a24',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
-    padding: 14,
-    gap: 6,
+
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 20, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)', padding: 16, gap: 8,
   },
-  sessionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  sessionName: { color: '#e8e8f0', fontSize: 16, fontWeight: '700', flex: 1 },
-  sessionMeta: { color: '#8888aa', fontSize: 12 },
-  endBtn: {
-    marginTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#2a2a3a',
-    paddingTop: 10,
-    alignItems: 'center',
+  cardArrived: { borderColor: 'rgba(74,222,128,0.3)', backgroundColor: 'rgba(74,222,128,0.05)' },
+  cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  cardName:   { color: '#FFFFFF', fontSize: 15, fontWeight: '900', letterSpacing: 0.3 },
+  cardDest:   { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 2 },
+  cardMeta:   { color: 'rgba(255,255,255,0.3)', fontSize: 11 },
+  cardActions: { flexDirection: 'row', gap: 8, marginTop: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.07)' },
+  shareBtn: {
+    flex: 1, backgroundColor: 'rgba(74,222,128,0.12)', borderRadius: 999,
+    padding: 10, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)',
   },
-  endBtnText: { color: '#ef4444', fontSize: 13, fontWeight: '600' },
-  sheetContent: { padding: 20, gap: 16 },
-  sheetHint: { color: '#8888aa', fontSize: 13 },
-  sheetInput: {
-    backgroundColor: '#0a0a0f',
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
-    borderRadius: 12,
-    padding: 14,
-    color: '#e8e8f0',
-    fontSize: 16,
-    height: 52,
+  shareBtnText: { color: '#4ADE80', fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  arrivedBtn: {
+    flex: 1, backgroundColor: 'rgba(74,222,128,0.08)', borderRadius: 999,
+    padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#4ADE80',
   },
+  arrivedBtnText: { color: '#4ADE80', fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  endBtn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', alignItems: 'center' },
+  endBtnText: { color: '#EF4444', fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+
+  sheetContent: { padding: 20, gap: 14 },
+  sheetHint:    { color: 'rgba(255,255,255,0.45)', fontSize: 12 },
+  input: {
+    backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 14, padding: 14, color: '#FFFFFF', fontSize: 15, height: 52,
+  },
+  sectionLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 9, fontWeight: '900', letterSpacing: 1.6, marginTop: 4 },
+  watcherRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 14,
+    borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  watcherRowSelected: { borderColor: 'rgba(74,222,128,0.4)', backgroundColor: 'rgba(74,222,128,0.06)' },
+  watcherName: { flex: 1, color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  shareHint: {
+    backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+  },
+  shareHintText: { color: 'rgba(255,255,255,0.45)', fontSize: 12, lineHeight: 18 },
 });

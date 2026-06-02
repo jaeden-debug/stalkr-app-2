@@ -6,6 +6,7 @@
  *   • Sends a push notification to all crew members when zone has notify_on_arrival / notify_on_leave set
  *   • Persists presence to Supabase (saved_place_presence table)
  *   • Handles "stay too long" alerts when alert_rules.stay_too_long_minutes is set
+ *   • Respects quiet hours configured per zone (no alerts between quiet_hours_start and quiet_hours_end)
  */
 import { useEffect, useRef } from 'react';
 import { useMapStore } from '@/store/useMapStore';
@@ -15,7 +16,7 @@ import { sendZoneNotification, sendPushNotification } from '@/services/notificat
 import { upsertPresence } from '@/services/savedPlaces';
 import { isInsideCircle } from '@/utils/distance';
 import { isInsidePolygon } from '@/utils/polygon';
-import type { SavedPlace } from '@/types/models';
+import type { AlertRules, SavedPlace } from '@/types/models';
 
 export function useZonePresence() {
   const savedPlaces = useMapStore((s) => s.savedPlaces);
@@ -32,11 +33,12 @@ export function useZonePresence() {
     if (!myLocation || !userId || !activeGroupId) return;
     const { latitude, longitude } = myLocation;
 
-    // Collect crew push tokens (everyone except self)
-    const crewTokens = groupMembers
-      .filter((m) => m.user_id !== userId)
-      .map((m) => m.profile?.push_token)
-      .filter(Boolean) as string[];
+    // Collect crew members (everyone except self), keep userId↔token paired
+    const crewMembers = groupMembers.filter(
+      (m) => m.user_id !== userId && m.profile?.push_token,
+    );
+    const crewTokens = crewMembers.map((m) => m.profile!.push_token as string);
+    const crewUserIds = crewMembers.map((m) => m.user_id);
 
     const displayName = profile?.nickname || profile?.display_name || 'A crew member';
 
@@ -48,7 +50,7 @@ export function useZonePresence() {
       if (inside && !wasInside) {
         insideRef.current[zone.id] = true;
 
-        if (zone.notify_on_arrival) {
+        if (zone.notify_on_arrival && !isDuringQuietHours(zone.alert_rules)) {
           // Local — notify the device user
           sendZoneNotification(
             `📍 Entered — ${zone.name}`,
@@ -57,14 +59,15 @@ export function useZonePresence() {
             'zone_enter',
           ).catch(console.error);
 
-          // Push — notify crew
+          // Push — notify crew (type 'zone_crew' so crew can mute separately)
           if (crewTokens.length > 0) {
             sendPushNotification(
               crewTokens,
               `📍 ${displayName} entered ${zone.name}`,
               `${displayName} entered the zone.`,
-              { type: 'zone_enter', zoneId: zone.id },
+              { type: 'zone_crew', event: 'enter', zoneId: zone.id },
               'zone_alerts',
+              crewUserIds,
             ).catch(console.error);
           }
         }
@@ -73,14 +76,31 @@ export function useZonePresence() {
 
         const stayMins = zone.alert_rules?.stay_too_long_minutes;
         if (stayMins && stayMins > 0) {
+          // Capture crew arrays for the closure
+          const capturedCrewTokens = [...crewTokens];
+          const capturedCrewUserIds = [...crewUserIds];
+          const capturedAlertRules = zone.alert_rules;
           stayTimers.current[zone.id] = setTimeout(() => {
-            if (insideRef.current[zone.id]) {
+            if (insideRef.current[zone.id] && !isDuringQuietHours(capturedAlertRules)) {
+              // Local alert to the user themselves
               sendZoneNotification(
                 `⏱ Still in — ${zone.name}`,
                 `You've been here for over ${stayMins} minute${stayMins === 1 ? '' : 's'}.`,
                 zone.id,
                 'zone_stay',
               ).catch(console.error);
+
+              // Push crew so they know too (type 'zone_crew' so crew can mute separately)
+              if (capturedCrewTokens.length > 0) {
+                sendPushNotification(
+                  capturedCrewTokens,
+                  `⏱ ${displayName} still in ${zone.name}`,
+                  `${displayName} has been inside for over ${stayMins} minute${stayMins === 1 ? '' : 's'}.`,
+                  { type: 'zone_crew', event: 'overstay', zoneId: zone.id },
+                  'zone_alerts',
+                  capturedCrewUserIds,
+                ).catch(console.error);
+              }
             }
           }, stayMins * 60 * 1000);
         }
@@ -95,7 +115,7 @@ export function useZonePresence() {
           delete stayTimers.current[zone.id];
         }
 
-        if (zone.notify_on_leave) {
+        if (zone.notify_on_leave && !isDuringQuietHours(zone.alert_rules)) {
           // Local
           sendZoneNotification(
             `🚶 Left — ${zone.name}`,
@@ -104,14 +124,15 @@ export function useZonePresence() {
             'zone_leave',
           ).catch(console.error);
 
-          // Push — notify crew
+          // Push — notify crew (type 'zone_crew' so crew can mute separately)
           if (crewTokens.length > 0) {
             sendPushNotification(
               crewTokens,
               `🚶 ${displayName} left ${zone.name}`,
               `${displayName} has left the zone.`,
-              { type: 'zone_leave', zoneId: zone.id },
+              { type: 'zone_crew', event: 'leave', zoneId: zone.id },
               'zone_alerts',
+              crewUserIds,
             ).catch(console.error);
           }
         }
@@ -126,6 +147,33 @@ export function useZonePresence() {
   }, []);
 
   return { insideZones: insideRef.current };
+}
+
+/**
+ * Returns true if the current local time falls within the zone's quiet hours.
+ * Quiet hours may wrap midnight (e.g. 22:00 – 06:00).
+ * Format: "HH:MM" (24-hour).
+ */
+function isDuringQuietHours(rules: AlertRules | undefined): boolean {
+  const start = rules?.quiet_hours_start;
+  const end = rules?.quiet_hours_end;
+  if (!start || !end) return false;
+
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  const startMins = sh * 60 + sm;
+  const endMins = eh * 60 + em;
+
+  if (startMins <= endMins) {
+    // e.g. 09:00 – 17:00 (same day)
+    return nowMins >= startMins && nowMins < endMins;
+  } else {
+    // e.g. 22:00 – 06:00 (wraps midnight)
+    return nowMins >= startMins || nowMins < endMins;
+  }
 }
 
 function checkInside(zone: SavedPlace, lat: number, lng: number): boolean {

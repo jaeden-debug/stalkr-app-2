@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Haptics from 'expo-haptics';
 import type { Marker, SavedPlace, MapCrewMember, SelectedMapUser, RallyPoint } from '@/types/models';
 import type { MarkerType, LatLng } from '@/types/database';
 import * as markerService from '@/services/markers';
@@ -39,6 +40,7 @@ interface MapState {
   placingPolygonZone: boolean;
   polygonDraftPoints: LatLng[];
   movingZoneId: string | null;
+  draggingMarkerId: string | null;
 
   // Pending zone creation (set after tap/finish — triggers ZoneCreationSheet)
   pendingZoneCreation: {
@@ -100,6 +102,7 @@ interface MapState {
   confirmZoneCreation: (name: string, notifyArrival: boolean, notifyLeave: boolean) => Promise<SavedPlace | null>;
   cancelZoneCreation: () => void;
   setMovingZoneId: (id: string | null) => void;
+  setDraggingMarkerId: (id: string | null) => void;
   removeSavedPlaceFromStore: (id: string) => void;
   upsertSavedPlaceInStore: (place: SavedPlace) => void;
   updateSavedPlaceInStore: (id: string, updates: Partial<SavedPlace>) => void;
@@ -142,6 +145,7 @@ export const useMapStore = create<MapState>()(
       pendingZoneCreation: null,
       polygonDraftPoints: [],
       movingZoneId: null,
+      draggingMarkerId: null,
       userTrails: {},
       visibleTrailUsers: {},
       trailHistoryHours: 24,
@@ -233,6 +237,7 @@ export const useMapStore = create<MapState>()(
         });
 
         if (marker) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           set((s) => ({
             markers: [marker, ...s.markers],
             placingMarker: false,
@@ -336,6 +341,7 @@ export const useMapStore = create<MapState>()(
       cancelZoneCreation: () => set({ pendingZoneCreation: null, polygonDraftPoints: [] }),
 
       setMovingZoneId: (id) => set({ movingZoneId: id }),
+      setDraggingMarkerId: (id) => set({ draggingMarkerId: id }),
 
       removeSavedPlaceFromStore: (id) =>
         set((s) => ({ savedPlaces: s.savedPlaces.filter((p) => p.id !== id) })),

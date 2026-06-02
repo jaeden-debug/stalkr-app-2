@@ -19,7 +19,11 @@ import { isInsideCircle } from '@/utils/distance';
 import { isInsidePolygon } from '@/utils/polygon';
 import { isQuietHours } from '@/utils/time';
 import { upsertPresence } from '@/services/savedPlaces';
-import { sendZoneNotification } from '@/services/notifications';
+import { sendZoneNotification, sendPushNotification } from '@/services/notifications';
+import * as Haptics from 'expo-haptics';
+import { getWatcherPushTokens } from '@/services/sessions';
+import { useSessionStore } from '@/store/useSessionStore';
+import { supabase } from '@/services/supabase';
 import type { SavedPlace } from '@/types/models';
 import type { AlertRules } from '@/types/database';
 
@@ -62,6 +66,9 @@ export function useLocationTracker() {
   const zonePresence = useRef<Record<string, boolean>>({});
   const zoneLastAlert = useRef<Record<string, number>>({});
   const zoneEnteredAt = useRef<Record<string, number>>({});
+  const arrivedSessions = useRef<Set<string>>(new Set());
+  const broadcastChannel = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const broadcastChannelToken = useRef<string | null>(null);
   const mounted = useRef(true);
 
   const session = useAuthStore((s) => s.session);
@@ -236,6 +243,86 @@ export function useLocationTracker() {
               await checkZones(latitude, longitude, userId, groupId);
             }
           }
+
+          // ── Broadcast live location to web viewer ────────────────────────────
+          if (userId) {
+            const journeySession = useSessionStore.getState().activeJourneySession;
+            if (journeySession && !arrivedSessions.current.has(journeySession.id)) {
+              // Ensure we have a subscribed channel for this session's watch token
+              if (broadcastChannelToken.current !== journeySession.watch_token) {
+                if (broadcastChannel.current) {
+                  supabase.removeChannel(broadcastChannel.current);
+                }
+                const ch = supabase.channel(`session:${journeySession.watch_token}`);
+                ch.subscribe();
+                broadcastChannel.current = ch;
+                broadcastChannelToken.current = journeySession.watch_token;
+              }
+              try {
+                await broadcastChannel.current!.send({
+                  type: 'broadcast',
+                  event: 'location',
+                  payload: { latitude, longitude, heading: resolvedHeading, updatedAt: new Date().toISOString() },
+                });
+              } catch {}
+            } else if (!journeySession && broadcastChannel.current) {
+              // Session ended — clean up channel
+              supabase.removeChannel(broadcastChannel.current);
+              broadcastChannel.current = null;
+              broadcastChannelToken.current = null;
+            }
+          }
+
+          // ── Arrival detection (runs for any active journey session) ──────────
+          if (userId) {
+            const journeySession = useSessionStore.getState().activeJourneySession;
+            if (
+              journeySession &&
+              journeySession.destination_latitude != null &&
+              journeySession.destination_longitude != null &&
+              !arrivedSessions.current.has(journeySession.id)
+            ) {
+              const dist = haversineMeters(
+                latitude,
+                longitude,
+                journeySession.destination_latitude,
+                journeySession.destination_longitude,
+              );
+              if (dist <= 100) {
+                arrivedSessions.current.add(journeySession.id);
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                // Mark arrived in DB + store
+                await useSessionStore.getState().markArrived(journeySession.id);
+                // Broadcast arrival on Realtime channel for web viewer
+                const channel = supabase.channel(`session:${journeySession.watch_token}`);
+                await channel.subscribe();
+                await channel.send({
+                  type: 'broadcast',
+                  event: 'arrived',
+                  payload: { sessionId: journeySession.id, arrivedAt: new Date().toISOString() },
+                });
+                supabase.removeChannel(channel);
+                // Push member watchers
+                try {
+                  const watcherTokens = await getWatcherPushTokens(journeySession.id);
+                  if (watcherTokens.length) {
+                    const tokens = watcherTokens.map((w) => w.token);
+                    const userIds = watcherTokens.map((w) => w.userId);
+                    await sendPushNotification(
+                      tokens,
+                      `${journeySession.traveler_name ?? 'Someone'} arrived safely`,
+                      journeySession.destination_name
+                        ? `Arrived at ${journeySession.destination_name}`
+                        : 'Journey complete',
+                      { type: 'session_arrived', sessionId: journeySession.id },
+                      undefined,
+                      userIds,
+                    );
+                  }
+                } catch {}
+              }
+            }
+          }
         },
       );
     };
@@ -248,6 +335,11 @@ export function useLocationTracker() {
         globalWatch?.remove();
         globalWatch = null;
         globalWatchOwner = null;
+      }
+      if (broadcastChannel.current) {
+        supabase.removeChannel(broadcastChannel.current);
+        broadcastChannel.current = null;
+        broadcastChannelToken.current = null;
       }
     };
   }, []);

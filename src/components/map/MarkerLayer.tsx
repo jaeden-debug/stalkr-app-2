@@ -1,11 +1,13 @@
 /**
  * MarkerLayer — renders shared tactical markers.
  * Memoized per marker ID + selection state. Never rerenders on GPS ticks.
+ * Supports drag-to-move when draggingMarkerId matches.
  */
-import React, { memo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { memo, useCallback, useEffect, useRef } from 'react';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 import { Marker } from 'react-native-maps';
 import { useMapStore } from '@/store/useMapStore';
+import { updateMarker } from '@/services/markers';
 import { getMarkerConfig } from '@/constants/markerTypes';
 import type { Marker as MarkerModel } from '@/types/models';
 
@@ -23,6 +25,29 @@ export const MarkerLayer: React.FC = memo(() => {
 const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) => {
   const marker = useMapStore((s) => s.markers.find((m) => m.id === markerId));
   const isSelected = useMapStore((s) => s.selectedFieldMarkerId === markerId);
+  const isDragging = useMapStore((s) => s.draggingMarkerId === markerId);
+
+  // Drop-bounce animation on mount
+  const dropAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(dropAnim, {
+      toValue: 1,
+      tension: 80,
+      friction: 6,
+      useNativeDriver: true,
+    }).start();
+  }, []);
+  const scaleY = dropAnim.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0.3, 1.12, 1] });
+
+  const handleDragEnd = useCallback(
+    (e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
+      const { latitude, longitude } = e.nativeEvent.coordinate;
+      useMapStore.getState().updateMarkerInStore(markerId, { latitude, longitude });
+      useMapStore.getState().setDraggingMarkerId(null);
+      updateMarker(markerId, { latitude, longitude } as any).catch(() => {});
+    },
+    [markerId],
+  );
 
   if (!marker) return null;
   const { latitude, longitude } = marker;
@@ -34,13 +59,24 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
     <Marker
       coordinate={{ latitude, longitude }}
       anchor={{ x: 0.5, y: 1 }}
-      tracksViewChanges={isSelected}
-      onPress={() => useMapStore.getState().setSelectedFieldMarkerId(markerId)}
-      zIndex={isSelected ? 995 : 30}
+      tracksViewChanges={isSelected || isDragging}
+      draggable={isDragging}
+      onDragEnd={isDragging ? handleDragEnd : undefined}
+      onPress={() => {
+        if (!isDragging) useMapStore.getState().setSelectedFieldMarkerId(markerId);
+      }}
+      zIndex={isDragging ? 999 : isSelected ? 995 : 30}
     >
-      <View style={styles.wrapper}>
-        {/* Title badge — only when selected */}
-        {isSelected && (
+      <Animated.View style={[styles.wrapper, { transform: [{ scaleY }] }]}>
+        {/* Drag hint badge */}
+        {isDragging && (
+          <View style={styles.dragBadge}>
+            <Text style={styles.dragText}>Drop to place</Text>
+          </View>
+        )}
+
+        {/* Title badge — only when selected (not dragging) */}
+        {isSelected && !isDragging && (
           <View style={styles.titleBadge}>
             <Text style={styles.titleText} numberOfLines={1}>
               {marker.title}
@@ -54,9 +90,10 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
             styles.pin,
             { backgroundColor: '#111', borderColor: config.color },
             isSelected && [styles.pinSelected, { shadowColor: config.color }],
+            isDragging && [styles.pinDragging, { borderColor: '#fff', shadowColor: config.color }],
           ]}
         >
-          <Text style={[styles.emoji, isSelected && styles.emojiSelected]}>
+          <Text style={[styles.emoji, (isSelected || isDragging) && styles.emojiSelected]}>
             {config.emoji}
           </Text>
         </View>
@@ -65,11 +102,11 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
         <View
           style={[
             styles.stem,
-            { borderTopColor: config.color },
-            isSelected && styles.stemSelected,
+            { borderTopColor: isDragging ? '#fff' : config.color },
+            (isSelected || isDragging) && styles.stemSelected,
           ]}
         />
-      </View>
+      </Animated.View>
     </Marker>
   );
 });
@@ -77,7 +114,20 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
 const styles = StyleSheet.create({
   wrapper: { alignItems: 'center' },
 
-  // Title badge
+  dragBadge: {
+    marginBottom: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(34,197,94,0.9)',
+    borderRadius: 8,
+  },
+  dragText: {
+    color: '#000',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+
   titleBadge: {
     marginBottom: 4,
     paddingHorizontal: 8,
@@ -95,7 +145,6 @@ const styles = StyleSheet.create({
     maxWidth: 160,
   },
 
-  // Pin
   pin: {
     width: 38,
     height: 38,
@@ -118,10 +167,19 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 10,
   },
+  pinDragging: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: 3,
+    shadowOpacity: 1,
+    shadowRadius: 14,
+    elevation: 14,
+    opacity: 0.92,
+  },
   emoji: { fontSize: 18 },
   emojiSelected: { fontSize: 22 },
 
-  // Stem (triangle tail)
   stem: {
     width: 0,
     height: 0,

@@ -12,6 +12,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useBillingStore } from '@/store/useBillingStore';
 import { useGroupStore } from '@/store/useGroupStore';
+import { loadNotificationPrefs } from '@/store/useNotificationStore';
 import { initSentry, setSentryUser, clearSentryUser } from '@/services/sentry';
 import { initPostHog, identifyUser, resetAnalytics } from '@/services/analytics';
 
@@ -34,6 +35,8 @@ function RootLayoutInner() {
       await loadGroups();
       const gid = useGroupStore.getState().activeGroupId;
       if (gid) loadGroupMembers(gid);
+      // Hydrate notification prefs from DB so settings are consistent across devices
+      loadNotificationPrefs().catch(console.error);
     });
     loadEntitlement();
   }, []);

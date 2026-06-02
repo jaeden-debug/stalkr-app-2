@@ -4,15 +4,32 @@ import { Platform } from 'react-native';
 import { supabase } from './supabase';
 import Constants from 'expo-constants';
 
-// Set handler once globally
+// Supabase Edge Function URL for server-side push with pref filtering
+const SEND_PUSH_FUNCTION_URL = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/send-push`;
+
+// Set handler once globally — checks user prefs to suppress foreground alerts.
+// Background notifications are shown by the OS and cannot be suppressed client-side.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    // Lazy-require to avoid circular imports
+    const { useNotificationStore } = require('@/store/useNotificationStore');
+    const type = (notification.request.content.data as any)?.type as string | undefined;
+
+    let suppress = false;
+    if (type) {
+      suppress = !useNotificationStore.getState().shouldShow(
+        type as 'zone_enter' | 'zone_leave' | 'zone_stay' | 'zone_crew' | 'sos' | 'sos_cancel',
+      );
+    }
+
+    return {
+      shouldShowAlert: !suppress,
+      shouldShowBanner: !suppress,
+      shouldShowList: !suppress,
+      shouldPlaySound: !suppress,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 export async function setupAndroidChannels(): Promise<void> {
@@ -89,31 +106,52 @@ export async function registerPushToken(userId: string): Promise<string | null> 
   }
 }
 
+/**
+ * Send push notifications to a list of recipients.
+ *
+ * Routes through the Supabase send-push Edge Function so that each
+ * recipient's server-side notification preferences are respected before
+ * delivery — this suppresses background pushes for opted-out users,
+ * not just foreground alerts.
+ *
+ * @param tokens          Expo push tokens (parallel-indexed with recipientUserIds)
+ * @param title           Notification title
+ * @param body            Notification body
+ * @param data            Payload (must include `type` for pref filtering)
+ * @param channelId       Android channel
+ * @param recipientUserIds Supabase user IDs parallel to tokens (required for server-side pref filtering)
+ */
 export async function sendPushNotification(
   tokens: string[],
   title: string,
   body: string,
   data?: Record<string, unknown>,
   channelId?: string,
+  recipientUserIds?: string[],
 ): Promise<void> {
   const valid = tokens.filter((t) => t?.startsWith('ExponentPushToken'));
   if (valid.length === 0) return;
 
-  const messages = valid.map((to) => ({
-    to,
-    title,
-    body,
-    data: data ?? {},
-    sound: 'default',
-    channelId: channelId ?? 'default',
-    priority: 'high',
-  }));
+  // Get the current session's access token for the Edge Function
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
 
   try {
-    await fetch('https://exp.host/--/api/v2/push/send', {
+    await fetch(SEND_PUSH_FUNCTION_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(messages),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({
+        tokens: valid,
+        title,
+        body,
+        data: data ?? {},
+        channelId: channelId ?? 'default',
+        type: (data as any)?.type ?? 'general',
+        recipientUserIds,
+      }),
     });
   } catch (err) {
     console.error('[notifications] Push send error:', err);
@@ -146,13 +184,34 @@ export async function sendZoneNotification(
   await sendLocalNotification(title, body, { type: eventType, zoneId }, 'zone_alerts');
 }
 
-export async function sendSOSNotification(tokens: string[], userName: string, coords: { latitude: number; longitude: number }): Promise<void> {
+export async function sendSOSNotification(
+  tokens: string[],
+  userName: string,
+  coords: { latitude: number; longitude: number },
+  recipientUserIds?: string[],
+): Promise<void> {
   await sendPushNotification(
     tokens,
     `🆘 SOS — ${userName}`,
     `${userName} activated SOS. Tap to view their location.`,
     { type: 'sos', latitude: coords.latitude, longitude: coords.longitude },
     'sos',
+    recipientUserIds,
+  );
+}
+
+export async function sendSOSCancelNotification(
+  tokens: string[],
+  userName: string,
+  recipientUserIds?: string[],
+): Promise<void> {
+  await sendPushNotification(
+    tokens,
+    `✅ SOS Cancelled — ${userName}`,
+    `${userName} has cancelled their SOS alert. They are safe.`,
+    { type: 'sos_cancel' },
+    'safety',
+    recipientUserIds,
   );
 }
 

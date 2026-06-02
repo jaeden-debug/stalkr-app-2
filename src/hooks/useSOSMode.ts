@@ -3,11 +3,12 @@
  * Drops exact location, creates group event, sends push notifications.
  */
 import { useCallback } from 'react';
+import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useMapStore } from '@/store/useMapStore';
 import { logEvent } from '@/services/groupEvents';
-import { sendSOSNotification, sendLocalNotification } from '@/services/notifications';
+import { sendSOSNotification, sendSOSCancelNotification, sendLocalNotification } from '@/services/notifications';
 import { supabase } from '@/services/supabase';
 import { FEATURES } from '@/config/features';
 import { track } from '@/services/analytics';
@@ -22,6 +23,7 @@ export function useSOSMode() {
 
   const triggerSOS = useCallback(async () => {
     if (!FEATURES.SOS_MODE || !userId) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     track({ name: 'sos_triggered' });
 
     const coords = myLocation
@@ -44,14 +46,13 @@ export function useSOSMode() {
       );
     }
 
-    // Collect push tokens of all group members (admins/owners priority)
-    const tokens = groupMembers
-      .filter((m) => m.user_id !== userId)
-      .map((m) => m.profile?.push_token)
-      .filter(Boolean) as string[];
+    // Collect push tokens + user IDs of all group members
+    const crewMembers = groupMembers.filter((m) => m.user_id !== userId && m.profile?.push_token);
+    const tokens = crewMembers.map((m) => m.profile!.push_token as string);
+    const userIds = crewMembers.map((m) => m.user_id);
 
     if (tokens.length > 0 && coords) {
-      await sendSOSNotification(tokens, userName, coords);
+      await sendSOSNotification(tokens, userName, coords, userIds);
     }
 
     // Local confirmation
@@ -63,10 +64,42 @@ export function useSOSMode() {
     );
   }, [userId, profile, activeGroupId, groupMembers, myLocation]);
 
-  const dismissSOS = useCallback(() => {
+  const dismissSOS = useCallback(async () => {
     track({ name: 'sos_cancelled' });
+
+    const userName = profile?.nickname || profile?.display_name || 'A crew member';
+
+    // Log cancellation event
+    if (activeGroupId && userId) {
+      await logEvent(
+        activeGroupId,
+        userId,
+        'sos_cancelled',
+        `✅ SOS Cancelled — ${userName}`,
+        `${userName} cancelled their SOS alert.`,
+        {},
+      ).catch(console.error);
+    }
+
+    // Notify crew SOS is cancelled
+    const cancelCrewMembers = groupMembers.filter((m) => m.user_id !== userId && m.profile?.push_token);
+    const cancelTokens = cancelCrewMembers.map((m) => m.profile!.push_token as string);
+    const cancelUserIds = cancelCrewMembers.map((m) => m.user_id);
+
+    if (cancelTokens.length > 0) {
+      await sendSOSCancelNotification(cancelTokens, userName, cancelUserIds).catch(console.error);
+    }
+
+    // Local confirmation
+    await sendLocalNotification(
+      '✅ SOS Cancelled',
+      'Your crew has been notified that you are safe.',
+      { type: 'sos_cancel' },
+      'safety',
+    ).catch(console.error);
+
     clearSOS();
-  }, [clearSOS]);
+  }, [clearSOS, userId, profile, activeGroupId, groupMembers]);
 
   return { triggerSOS, dismissSOS };
 }

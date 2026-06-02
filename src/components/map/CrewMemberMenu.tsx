@@ -76,6 +76,15 @@ export const CrewMemberMenu: React.FC<CrewMemberMenuProps> = memo(({ visible, on
           {location?.battery_level != null && <BatteryIndicator level={location.battery_level} size="md" />}
         </View>
 
+        {location && (
+          <View style={[styles.statusBar, status === 'live' ? styles.statusBarLive : styles.statusBarStale]}>
+            <View style={[styles.statusDot, status === 'live' ? styles.statusDotLive : styles.statusDotStale]} />
+            <Text style={[styles.statusBarText, status === 'live' ? styles.statusBarTextLive : styles.statusBarTextStale]}>
+              {status === 'live' ? 'LIVE LOCATION' : 'LAST KNOWN'}
+            </Text>
+          </View>
+        )}
+
         {location ? (
           <>
             <TouchableOpacity style={styles.coordBox} onPress={handleCopyCoords} activeOpacity={0.7}>
@@ -111,7 +120,7 @@ export const CrewMemberMenu: React.FC<CrewMemberMenuProps> = memo(({ visible, on
 
         <View style={styles.toggleGroup}>
           <View style={[styles.toggleRow, styles.noBorder]}>
-            <Text style={styles.toggleLabel}>Show Trail</Text>
+            <Text style={styles.toggleLabel}>Breadcrumb Trail</Text>
             <Toggle value={trailVisible} onValueChange={() => toggleTrail(userId)} />
           </View>
         </View>
@@ -147,6 +156,15 @@ const styles = StyleSheet.create({
   statItem: { flex: 1, minWidth: '45%', backgroundColor: '#12121a', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#2a2a3a' },
   statLabel: { color: '#8888aa', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.8 },
   statValue: { color: '#e8e8f0', fontSize: 14, fontWeight: '600', marginTop: 2 },
+  statusBar: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1 },
+  statusBarLive: { backgroundColor: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.3)' },
+  statusBarStale: { backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)' },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusDotLive: { backgroundColor: '#22c55e' },
+  statusDotStale: { backgroundColor: '#ef4444' },
+  statusBarText: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
+  statusBarTextLive: { color: '#22c55e' },
+  statusBarTextStale: { color: '#ef4444' },
   noLocation: { padding: 24, alignItems: 'center' },
   noLocationText: { color: '#8888aa', fontSize: 14 },
   toggleGroup: { backgroundColor: '#12121a', borderRadius: 10, borderWidth: 1, borderColor: '#2a2a3a' },

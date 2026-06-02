@@ -1,25 +1,33 @@
 import { create } from 'zustand';
-import type { Session } from '@/types/models';
+import type { Session, SessionWatcher } from '@/types/models';
 import * as sessionService from '@/services/sessions';
 import * as eventService from '@/services/groupEvents';
 import { useAuthStore } from './useAuthStore';
+import { useGroupStore } from './useGroupStore';
 
 interface SessionStoreState {
   sessions: Session[];
-  activeSession: Session | null;
+  activeSession: Session | null;       // group session (for the group feed)
+  activeJourneySession: Session | null; // personal journey session (for tracking)
   isLoading: boolean;
   error: string | null;
 
   loadGroupSessions: (groupId: string) => Promise<void>;
-  createSession: (groupId: string, name: string, options?: {
+  loadMyJourneySession: () => Promise<void>;
+  createSession: (options: {
+    name: string;
+    groupId?: string | null;
+    travelerName?: string;
     destinationName?: string;
     destinationLat?: number;
     destinationLng?: number;
     autoEndAt?: string;
     notifyOnEnd?: boolean;
+    watchers?: { userId: string; pushToken: string | null }[];
   }) => Promise<Session | null>;
   joinSessionByCode: (code: string) => Promise<Session | null>;
   endSession: (sessionId: string) => Promise<boolean>;
+  markArrived: (sessionId: string) => Promise<boolean>;
   setActiveSession: (session: Session | null) => void;
   clearError: () => void;
 }
@@ -27,6 +35,7 @@ interface SessionStoreState {
 export const useSessionStore = create<SessionStoreState>()((set, get) => ({
   sessions: [],
   activeSession: null,
+  activeJourneySession: null,
   isLoading: false,
   error: null,
 
@@ -37,14 +46,29 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
     set({ sessions, activeSession: active, isLoading: false });
   },
 
-  createSession: async (groupId, name, options = {}) => {
+  loadMyJourneySession: async () => {
     const userId = useAuthStore.getState().session?.user?.id;
+    if (!userId) return;
+    const session = await sessionService.fetchMyActiveJourneySession(userId);
+    set({ activeJourneySession: session });
+  },
+
+  createSession: async (options) => {
+    const userId = useAuthStore.getState().session?.user?.id;
+    const profile = useAuthStore.getState().profile;
     if (!userId) return null;
 
+    const travelerName =
+      options.travelerName ??
+      profile?.nickname ??
+      profile?.display_name ??
+      'Someone';
+
     const session = await sessionService.createSession({
-      group_id: groupId,
+      group_id: options.groupId ?? null,
       created_by: userId,
-      name,
+      name: options.name,
+      traveler_name: travelerName,
       destination_name: options.destinationName ?? null,
       destination_latitude: options.destinationLat ?? null,
       destination_longitude: options.destinationLng ?? null,
@@ -52,10 +76,35 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
       notify_on_end: options.notifyOnEnd ?? true,
     });
 
-    if (session) {
-      set((s) => ({ sessions: [session, ...s.sessions], activeSession: session }));
-      await eventService.logEvent(groupId, userId, 'session_started', `Session started: ${name}`);
+    if (!session) return null;
+
+    // Add watchers
+    if (options.watchers?.length) {
+      await Promise.all(
+        options.watchers.map((w) =>
+          sessionService.addMemberWatcher(session.id, w.userId, w.pushToken),
+        ),
+      );
     }
+
+    // Log to group feed if group-tied
+    const groupId = options.groupId ?? useGroupStore.getState().activeGroupId;
+    if (groupId) {
+      await eventService.logEvent(
+        groupId,
+        userId,
+        'session_started',
+        `Journey started: ${options.name}`,
+        options.destinationName ? `Heading to ${options.destinationName}` : undefined,
+      );
+    }
+
+    set((s) => ({
+      sessions: [session, ...s.sessions],
+      activeSession: s.activeSession ?? (options.groupId ? session : s.activeSession),
+      activeJourneySession: session,
+    }));
+
     return session;
   },
 
@@ -74,15 +123,58 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
 
   endSession: async (sessionId) => {
     const userId = useAuthStore.getState().session?.user?.id;
-    const session = get().sessions.find((s) => s.id === sessionId);
+    const session = get().sessions.find((s) => s.id === sessionId)
+      ?? get().activeJourneySession;
     const ok = await sessionService.endSession(sessionId);
     if (ok) {
       set((s) => ({
-        sessions: s.sessions.map((sess) => sess.id === sessionId ? { ...sess, is_active: false } : sess),
+        sessions: s.sessions.map((sess) =>
+          sess.id === sessionId ? { ...sess, is_active: false, status: 'cancelled' } : sess,
+        ),
         activeSession: s.activeSession?.id === sessionId ? null : s.activeSession,
+        activeJourneySession: s.activeJourneySession?.id === sessionId ? null : s.activeJourneySession,
       }));
-      if (session && userId) {
-        await eventService.logEvent(session.group_id, userId, 'session_ended', `Session ended: ${session.name}`);
+      const groupId = session?.group_id ?? useGroupStore.getState().activeGroupId;
+      if (session && userId && groupId) {
+        await eventService.logEvent(groupId, userId, 'session_ended', `Session ended: ${session.name}`);
+      }
+    }
+    return ok;
+  },
+
+  markArrived: async (sessionId) => {
+    const userId = useAuthStore.getState().session?.user?.id;
+    const session = get().sessions.find((s) => s.id === sessionId)
+      ?? get().activeJourneySession;
+    const ok = await sessionService.markSessionArrived(sessionId);
+    if (ok) {
+      set((s) => ({
+        sessions: s.sessions.map((sess) =>
+          sess.id === sessionId
+            ? { ...sess, is_active: false, status: 'arrived', arrived_at: new Date().toISOString() }
+            : sess,
+        ),
+        activeSession: s.activeSession?.id === sessionId ? null : s.activeSession,
+        activeJourneySession: null,
+      }));
+      const groupId = session?.group_id ?? useGroupStore.getState().activeGroupId;
+      if (session && userId && groupId) {
+        await eventService.logEvent(
+          groupId,
+          userId,
+          'session_ended',
+          `✅ Arrived safely: ${session.name}`,
+          session.destination_name ? `Arrived at ${session.destination_name}` : undefined,
+        );
+      }
+      // Trigger arrival email Edge Function (fire and forget)
+      if (session) {
+        const fnUrl = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/send-arrival-email`;
+        fetch(fnUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        }).catch(() => {});
       }
     }
     return ok;

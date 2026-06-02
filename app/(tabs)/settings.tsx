@@ -1,127 +1,134 @@
-import React from 'react';
-import { Alert, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import React, { useState } from 'react';
+import { Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useBillingStore } from '@/store/useBillingStore';
-import { ActionRow } from '@/components/ui/ActionRow';
-import { SectionHeader } from '@/components/ui/SectionHeader';
 import { Avatar } from '@/components/ui/Avatar';
-import { Badge } from '@/components/ui/Badge';
-import { Divider } from '@/components/ui/Divider';
+import { NotificationPrefsSheet } from '@/components/ui/NotificationPrefsSheet';
+import { C } from '@/constants/theme';
+
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+
+function Row({ icon, label, sub, onPress, danger = false }: {
+  icon: IoniconName; label: string; sub?: string; onPress: () => void; danger?: boolean;
+}) {
+  return (
+    <TouchableOpacity style={s.row} onPress={onPress} activeOpacity={0.75}>
+      <View style={[s.rowIcon, danger && s.rowIconDanger]}>
+        <Ionicons name={icon} size={18} color={danger ? C.red : C.green} />
+      </View>
+      <View style={s.rowInfo}>
+        <Text style={[s.rowLabel, danger && { color: C.red }]}>{label}</Text>
+        {sub && <Text style={s.rowSub}>{sub}</Text>}
+      </View>
+      <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.2)" />
+    </TouchableOpacity>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={s.section}>
+      <Text style={s.sectionLabel}>{title}</Text>
+      <View style={s.card}>{children}</View>
+    </View>
+  );
+}
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { profile, user, signOut } = useAuthStore();
   const { plan } = useBillingStore();
+  const [notifSheet, setNotifSheet] = useState(false);
+
+  const planColor = plan === 'free' ? 'rgba(255,255,255,0.3)' : C.green;
+  const planLabel = plan === 'free' ? 'FREE' : plan.toUpperCase();
 
   const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+    Alert.alert('Sign Out', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: () => signOut() },
+      { text: 'Sign Out', style: 'destructive', onPress: signOut },
     ]);
   };
 
-  const planVariant = plan === 'free' ? 'offline' : plan === 'pro' ? 'live' : 'crew';
-  const planLabel = plan === 'free' ? 'Free Plan' : plan === 'pro' ? 'Pro' : 'Crew';
-
   return (
-    <SafeAreaView style={styles.root}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Settings</Text>
+    <SafeAreaView style={s.root}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+        <Text style={s.title}>SETTINGS</Text>
 
         {/* Profile card */}
-        <View style={styles.profileCard}>
-          <Avatar
-            uri={profile?.avatar_url}
-            initials={profile?.initials}
-            displayName={profile?.display_name}
-            size={60}
-            color="#22c55e"
-          />
-          <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>
-              {profile?.nickname || profile?.display_name || user?.email}
+        <TouchableOpacity style={s.profileCard} onPress={() => router.push('/profile')} activeOpacity={0.85}>
+          <Avatar uri={profile?.avatar_url} initials={profile?.initials} displayName={profile?.display_name} size={56} color={C.green} />
+          <View style={s.profileInfo}>
+            <Text style={s.profileName} numberOfLines={1}>
+              {(profile?.nickname ?? profile?.display_name ?? 'OPERATOR').toUpperCase()}
             </Text>
-            <Text style={styles.profileEmail}>{user?.email}</Text>
-            <Badge label={planLabel} variant={planVariant as any} />
+            <Text style={s.profileEmail} numberOfLines={1}>{user?.email}</Text>
           </View>
-        </View>
+          <View style={[s.planBadge, { borderColor: planColor }]}>
+            <Text style={[s.planText, { color: planColor }]}>{planLabel}</Text>
+          </View>
+        </TouchableOpacity>
 
-        <Divider margin={4} />
+        <Section title="NOTIFICATIONS">
+          <Row icon="notifications" label="NOTIFICATION PREFERENCES" sub="Zone alerts, SOS, crew activity" onPress={() => setNotifSheet(true)} />
+        </Section>
 
-        {/* Account */}
-        <SectionHeader title="Account" />
-        <View style={styles.section}>
-          <ActionRow
-            label="Edit Profile"
-            subtitle="Name, photo, initials"
-            leftIcon={<Text>👤</Text>}
-            onPress={() => router.push('/profile')}
-          />
-          <ActionRow
-            label="Emergency Contacts"
-            leftIcon={<Text>🆘</Text>}
-            onPress={() => router.push('/emergency-contacts')}
-          />
-        </View>
+        <Section title="ACCOUNT">
+          <Row icon="person" label="EDIT PROFILE" sub="Name, photo, call sign" onPress={() => router.push('/profile')} />
+          <View style={s.sep} />
+          <Row icon="call" label="EMERGENCY CONTACTS" sub="Who to alert in an SOS" onPress={() => router.push('/emergency-contacts')} />
+        </Section>
 
-        {/* Subscription */}
-        <SectionHeader title="Subscription" />
-        <View style={styles.section}>
-          <ActionRow
-            label={plan === 'free' ? 'Upgrade to Pro' : 'Manage Subscription'}
-            subtitle={plan === 'free' ? 'Unlock zones, trails & more' : `Current plan: ${plan}`}
-            leftIcon={<Text>⚡</Text>}
+        <Section title="SUBSCRIPTION">
+          <Row
+            icon="flash"
+            label={plan === 'free' ? 'UPGRADE TO PRO' : 'MANAGE SUBSCRIPTION'}
+            sub={plan === 'free' ? 'Unlock zones, trails & more' : `Current: ${plan.toUpperCase()}`}
             onPress={() => router.push('/subscription')}
           />
-        </View>
+        </Section>
 
-        {/* Danger zone */}
-        <SectionHeader title="Account Actions" />
-        <View style={styles.section}>
-          <ActionRow
-            label="Sign Out"
-            leftIcon={<Text>🚪</Text>}
-            onPress={handleSignOut}
-            destructive
-            showChevron={false}
-          />
-        </View>
+        <Section title="DANGER ZONE">
+          <Row icon="log-out" label="SIGN OUT" onPress={handleSignOut} danger />
+        </Section>
 
-        <View style={styles.footer}>
-          <Text style={styles.footerVersion}>Stalkr v1.0.0</Text>
-        </View>
+        <Text style={s.version}>STALKR · v2.0.0</Text>
       </ScrollView>
+
+      <NotificationPrefsSheet visible={notifSheet} onClose={() => setNotifSheet(false)} />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0f' },
-  title: { color: '#e8e8f0', fontSize: 24, fontWeight: '800', padding: 16, paddingTop: 8 },
+const s = StyleSheet.create({
+  root:  { flex: 1, backgroundColor: C.bg },
+  title: { color: C.textPrimary, fontSize: 22, fontWeight: '900', letterSpacing: 1.5, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
+
   profileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    margin: 16,
-    backgroundColor: '#1a1a24',
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    marginHorizontal: 16, marginBottom: 28,
+    backgroundColor: C.surface, borderRadius: 20,
+    borderWidth: 1, borderColor: C.border, padding: 16,
   },
-  profileInfo: { flex: 1, gap: 6 },
-  profileName: { color: '#e8e8f0', fontSize: 17, fontWeight: '700' },
-  profileEmail: { color: '#8888aa', fontSize: 13 },
-  section: {
-    backgroundColor: '#1a1a24',
-    borderRadius: 12,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
-    overflow: 'hidden',
-  },
-  footer: { padding: 24, alignItems: 'center' },
-  footerVersion: { color: '#5555aa', fontSize: 12 },
+  profileInfo:  { flex: 1 },
+  profileName:  { color: C.textPrimary, fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
+  profileEmail: { color: 'rgba(255,255,255,0.4)', fontSize: 12, marginTop: 3 },
+  planBadge:    { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
+  planText:     { fontSize: 9, fontWeight: '900', letterSpacing: 1.2 },
+
+  section:      { marginBottom: 24, paddingHorizontal: 16 },
+  sectionLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 9, fontWeight: '900', letterSpacing: 1.6, marginBottom: 10, marginLeft: 4 },
+  card:         { backgroundColor: C.surface, borderRadius: 18, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
+
+  row:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 },
+  sep:         { height: 1, backgroundColor: C.borderFaint, marginHorizontal: 16 },
+  rowIcon:     { width: 36, height: 36, borderRadius: 10, backgroundColor: C.greenDim, alignItems: 'center', justifyContent: 'center' },
+  rowIconDanger: { backgroundColor: C.redDim },
+  rowInfo:     { flex: 1 },
+  rowLabel:    { color: C.textPrimary, fontSize: 13, fontWeight: '800', letterSpacing: 0.3 },
+  rowSub:      { color: 'rgba(255,255,255,0.4)', fontSize: 11, marginTop: 2 },
+
+  version: { textAlign: 'center', color: 'rgba(255,255,255,0.15)', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, paddingBottom: 8 },
 });

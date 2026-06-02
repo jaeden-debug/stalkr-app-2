@@ -1,6 +1,6 @@
 /**
  * ZoneDetailSheet — shows details for a selected saved place/zone.
- * Owners/creators can toggle notify_on_arrival and notify_on_leave inline.
+ * Owners/creators can rename, move, toggle alerts, and delete.
  */
 import React, { memo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useToast } from '@/components/ui/Toast';
 import { deleteSavedPlace, updateSavedPlace } from '@/services/savedPlaces';
 import { timeAgo } from '@/utils/time';
 
@@ -22,7 +23,9 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
   const savedPlaces = useMapStore((s) => s.savedPlaces);
   const removeSavedPlaceFromStore = useMapStore((s) => s.removeSavedPlaceFromStore);
   const updateSavedPlaceInStore = useMapStore((s) => s.updateSavedPlaceInStore);
+  const setMovingZoneId = useMapStore((s) => s.setMovingZoneId);
   const userId = useAuthStore((s) => s.user?.id);
+  const toast = useToast();
 
   const [savingArrival, setSavingArrival] = useState(false);
   const [savingLeave, setSavingLeave] = useState(false);
@@ -30,6 +33,9 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
   const [quietStart, setQuietStart] = useState<string>('');
   const [quietEnd, setQuietEnd] = useState<string>('');
   const [zoneType, setZoneType] = useState<string>('');
+  const [zoneName, setZoneName] = useState<string>('');
+  const [renaming, setRenaming] = useState(false);
+  const [savingName, setSavingName] = useState(false);
 
   const zone = savedPlaces.find((z) => z.id === zoneId);
 
@@ -40,6 +46,8 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
       setQuietStart(zone.alert_rules?.quiet_hours_start ?? '');
       setQuietEnd(zone.alert_rules?.quiet_hours_end ?? '');
       setZoneType(zone.type ?? '');
+      setZoneName(zone.name ?? '');
+      setRenaming(false);
     }
   }, [zone?.id]);
 
@@ -77,6 +85,23 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
     await updateSavedPlace(zone.id, updates);
   };
 
+  const handleSaveName = async () => {
+    const trimmed = zoneName.trim();
+    if (!trimmed || trimmed === zone.name) { setRenaming(false); return; }
+    setSavingName(true);
+    updateSavedPlaceInStore(zone.id, { name: trimmed });
+    await updateSavedPlace(zone.id, { name: trimmed });
+    setSavingName(false);
+    setRenaming(false);
+    toast.success('Zone renamed');
+  };
+
+  const handleMove = () => {
+    setMovingZoneId(zone.id);
+    onClose();
+    toast.info('Drag the zone label to reposition it');
+  };
+
   const handleDelete = () => {
     Alert.alert('Delete Zone', `Delete "${zone.name}"?`, [
       { text: 'Cancel', style: 'cancel' },
@@ -93,7 +118,7 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
   };
 
   return (
-    <Sheet visible={visible} onClose={onClose} title={zone.name} snapHeight={480}>
+    <Sheet visible={visible} onClose={onClose} title={zone.name} snapHeight={600}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
         {/* Type badges */}
@@ -241,7 +266,53 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
         <Text style={styles.meta}>Created {timeAgo(zone.created_at)}</Text>
 
         {isOwner && (
-          <Button label="Delete Zone" variant="danger" onPress={handleDelete} fullWidth />
+          <>
+            <View style={styles.divider} />
+
+            {/* Rename */}
+            {renaming ? (
+              <View style={styles.renameRow}>
+                <TextInput
+                  style={styles.renameInput}
+                  value={zoneName}
+                  onChangeText={setZoneName}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={handleSaveName}
+                  selectionColor="#22c55e"
+                  placeholderTextColor="#5555aa"
+                />
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSaveName} disabled={savingName}>
+                  <Text style={styles.saveBtnText}>{savingName ? '…' : 'Save'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => { setZoneName(zone.name); setRenaming(false); }}>
+                  <Text style={styles.cancelBtnText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.actionRow} onPress={() => setRenaming(true)}>
+                <Text style={styles.actionIcon}>✏️</Text>
+                <Text style={styles.actionLabel}>Rename Zone</Text>
+                <Text style={styles.actionChevron}>›</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Move */}
+            <TouchableOpacity style={styles.actionRow} onPress={handleMove}>
+              <Text style={styles.actionIcon}>✥</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.actionLabel}>Move Zone</Text>
+                <Text style={styles.actionSub}>Drag the label to reposition</Text>
+              </View>
+              <Text style={styles.actionChevron}>›</Text>
+            </TouchableOpacity>
+
+            {/* Delete */}
+            <TouchableOpacity style={[styles.actionRow, styles.actionRowDanger]} onPress={handleDelete}>
+              <Text style={styles.actionIcon}>🗑️</Text>
+              <Text style={[styles.actionLabel, styles.actionLabelDanger]}>Delete Zone</Text>
+            </TouchableOpacity>
+          </>
         )}
       </ScrollView>
     </Sheet>
@@ -318,4 +389,33 @@ const styles = StyleSheet.create({
   },
   zoneTypePillText: { color: '#8888aa', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
   zoneTypePillTextActive: { color: '#22c55e' },
+
+  divider: { height: 1, backgroundColor: '#2a2a3a', marginVertical: 2 },
+  actionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 13, paddingHorizontal: 4,
+    borderBottomWidth: 1, borderBottomColor: '#1a1a28',
+  },
+  actionRowDanger: { borderBottomWidth: 0, marginTop: 4 },
+  actionIcon: { fontSize: 18, width: 26, textAlign: 'center' },
+  actionLabel: { flex: 1, color: '#e8e8f0', fontSize: 15, fontWeight: '500' },
+  actionLabelDanger: { color: '#ef4444' },
+  actionSub: { color: '#8888aa', fontSize: 12, marginTop: 1 },
+  actionChevron: { color: '#5555aa', fontSize: 18 },
+
+  renameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  renameInput: {
+    flex: 1, backgroundColor: '#0a0a0f', borderWidth: 1, borderColor: '#22c55e',
+    borderRadius: 10, padding: 11, color: '#e8e8f0', fontSize: 15, height: 46,
+  },
+  saveBtn: {
+    backgroundColor: '#22c55e', borderRadius: 10, paddingHorizontal: 14,
+    height: 46, alignItems: 'center', justifyContent: 'center',
+  },
+  saveBtnText: { color: '#000', fontWeight: '700', fontSize: 14 },
+  cancelBtn: {
+    width: 46, height: 46, borderRadius: 10, backgroundColor: '#1a1a28',
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2a2a3a',
+  },
+  cancelBtnText: { color: '#8888aa', fontSize: 16 },
 });

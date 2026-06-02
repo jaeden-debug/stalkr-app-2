@@ -15,7 +15,7 @@ export default ({ config }: ConfigContext): any => ({
   splash: {
     image: './assets/splash.png',
     resizeMode: 'contain',
-    backgroundColor: '#0a0a0f',
+    backgroundColor: '#080808',
   },
   updates: {
     fallbackToCacheTimeout: 0,
@@ -41,8 +41,8 @@ export default ({ config }: ConfigContext): any => ({
   },
   android: {
     adaptiveIcon: {
-      foregroundImage: './assets/adaptive-icon.png',
-      backgroundColor: '#0a0a0f',
+      foregroundImage: './assets/icon-foreground.png',
+      backgroundColor: '#080808',
     },
     package: ANDROID_PACKAGE,
     versionCode: 1,
@@ -78,10 +78,14 @@ export default ({ config }: ConfigContext): any => ({
     ],
   },
   web: {
-    favicon: './assets/favicon.png',
-    // Bundler: metro (required for Expo Router SSR support)
+    favicon: './assets/favicons/favicon-32.png',
     bundler: 'metro',
     output: 'server',
+    name: 'Stalkr',
+    shortName: 'Stalkr',
+    description: 'Know where your people are. Track, share, and stay safe with real-time location awareness, live GPS tracking, safety zones, alerts, and crew coordination.',
+    themeColor: '#4ADE80',
+    backgroundColor: '#080808',
   },
   extra: {
     supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,

@@ -39,13 +39,11 @@ const APP_STORE_URL =
   'https://apps.apple.com/app/stalkr/id0000000000'; // replace with real App Store ID
 const TESTFLIGHT_URL =
   'https://testflight.apple.com/join/XXXXXXXXXX'; // replace with real TestFlight link
-const OG_IMAGE_PATH =
-  '/assets/social/stalkr-group-invite-live-location-sharing-social-preview.png';
-const OG_IMAGE_URL = `${PRODUCTION_ORIGIN}${OG_IMAGE_PATH}`;
+const OG_IMAGE_URL = `${PRODUCTION_ORIGIN}/assets/og-invite-image.jpg`;
 
-const META_TITLE = "You're Invited to Join My Stalkr Group";
+const META_TITLE = "You're invited to join a Stalkr crew — Know Where Your People Are.";
 const META_DESCRIPTION =
-  'Join my Stalkr group for real-time location sharing, live crew tracking, safety alerts, waypoints, and outdoor awareness.';
+  'Track. Share. Stay Safe. Join this Stalkr crew for real-time location awareness, live GPS tracking, safety zones, and crew coordination.';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -166,18 +164,20 @@ export default function InviteWebPage() {
         <meta property="og:url" content={canonicalUrl} />
         <meta property="og:title" content={pageTitle} />
         <meta property="og:description" content={pageDescription} />
-        <meta property="og:image" content={OG_IMAGE_URL} />
-        <meta property="og:image:width" content="1200" />
+        <meta property="og:image"        content={OG_IMAGE_URL} />
+        <meta property="og:image:type"   content="image/jpeg" />
+        <meta property="og:image:width"  content="1200" />
         <meta property="og:image:height" content="630" />
-        <meta property="og:image:alt" content="Stalkr — real-time crew location sharing" />
-        <meta property="og:site_name" content="Stalkr" />
+        <meta property="og:image:alt"    content="Stalkr — real-time crew location sharing" />
+        <meta property="og:site_name"    content="Stalkr" />
 
         {/* Twitter / X */}
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content={pageTitle} />
+        <meta name="twitter:card"        content="summary_large_image" />
+        <meta name="twitter:site"        content="@stalkrapp" />
+        <meta name="twitter:title"       content={pageTitle} />
         <meta name="twitter:description" content={pageDescription} />
-        <meta name="twitter:image" content={OG_IMAGE_URL} />
-        <meta name="twitter:image:alt" content="Stalkr — real-time crew location sharing" />
+        <meta name="twitter:image"       content={OG_IMAGE_URL} />
+        <meta name="twitter:image:alt"   content="Stalkr — real-time crew location sharing" />
 
         {/* iOS Smart App Banner — shows "Open in Stalkr" natively on Safari */}
         {/* Replace app-id with real App Store numeric ID */}
@@ -187,7 +187,7 @@ export default function InviteWebPage() {
         />
 
         {/* Theme */}
-        <meta name="theme-color" content="#0a0a0f" />
+        <meta name="theme-color" content="#080808" />
         <meta name="color-scheme" content="dark" />
 
         {/* Prevent indexing of invalid/expired invite codes */}
