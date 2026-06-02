@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Group, GroupMember } from '@/types/models';
 import * as groupService from '@/services/groups';
 import * as eventService from '@/services/groupEvents';
@@ -32,7 +34,9 @@ interface GroupState {
   clearError: () => void;
 }
 
-export const useGroupStore = create<GroupState>()((set, get) => ({
+export const useGroupStore = create<GroupState>()(
+  persist(
+  (set, get) => ({
   groups: [],
   activeGroupId: null,
   groupMembers: [],
@@ -51,7 +55,10 @@ export const useGroupStore = create<GroupState>()((set, get) => ({
     set({ isLoading: true, error: null });
     const groups = await groupService.fetchMyGroups(userId);
     set({ groups, isLoading: false });
-    if (!get().activeGroupId && groups.length > 0) {
+    const currentActiveId = get().activeGroupId;
+    if (currentActiveId && groups.find((g) => g.id === currentActiveId)) {
+      // Persisted activeGroupId is valid — keep it
+    } else if (groups.length > 0) {
       set({ activeGroupId: groups[0].id });
     }
   },
@@ -133,7 +140,18 @@ export const useGroupStore = create<GroupState>()((set, get) => ({
     return ok;
   },
 
-  setActiveGroupId: (id) => set({ activeGroupId: id }),
+  setActiveGroupId: (id) => {
+    set({ activeGroupId: id });
+    // Restore per-group broadcasting state
+    if (id) {
+      // Import lazily to avoid circular dep
+      const { useLocationStore } = require('./useLocationStore');
+      const groupBroadcastingStatus = useLocationStore.getState().groupBroadcastingStatus;
+      const saved = groupBroadcastingStatus[id];
+      const newBroadcasting = saved !== undefined ? saved : true; // default true if no saved state
+      useLocationStore.getState().setIsBroadcasting(newBroadcasting);
+    }
+  },
 
   loadGroupMembers: async (groupId) => {
     set({ membersLoading: true });
@@ -165,4 +183,12 @@ export const useGroupStore = create<GroupState>()((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
-}));
+  }),
+  {
+    name: 'group-store',
+    storage: createJSONStorage(() => AsyncStorage),
+    partialize: (s) => ({
+      activeGroupId: s.activeGroupId,
+    }),
+  },
+));

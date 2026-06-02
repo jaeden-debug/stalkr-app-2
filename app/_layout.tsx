@@ -11,6 +11,7 @@ import { ToastProvider } from '@/components/ui/Toast';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useBillingStore } from '@/store/useBillingStore';
+import { useGroupStore } from '@/store/useGroupStore';
 import { initSentry, setSentryUser, clearSentryUser } from '@/services/sentry';
 import { initPostHog, identifyUser, resetAnalytics } from '@/services/analytics';
 
@@ -23,10 +24,17 @@ function RootLayoutInner() {
   const initialize = useAuthStore((s) => s.initialize);
   const loadEntitlement = useBillingStore((s) => s.loadEntitlement);
   const user = useAuthStore((s) => s.user);
+  const loadGroups = useGroupStore((s) => s.loadGroups);
+  const loadGroupMembers = useGroupStore((s) => s.loadGroupMembers);
+  const activeGroupId = useGroupStore((s) => s.activeGroupId);
 
   // Bootstrap auth + billing on mount
   useEffect(() => {
-    initialize();
+    initialize().then(async () => {
+      await loadGroups();
+      const gid = useGroupStore.getState().activeGroupId;
+      if (gid) loadGroupMembers(gid);
+    });
     loadEntitlement();
   }, []);
 

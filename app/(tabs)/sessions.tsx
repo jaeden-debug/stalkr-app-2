@@ -3,6 +3,7 @@ import {
   FlatList,
   RefreshControl,
   SafeAreaView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +13,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useGroupStore } from '@/store/useGroupStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -33,12 +35,16 @@ function timeAgo(iso: string | null): string {
 export default function SessionsScreen() {
   const router = useRouter();
   const toast = useToast();
-  const { sessions, isLoading, loadGroupSessions, createSession, endSession } = useSessionStore();
+  const { sessions, isLoading, loadGroupSessions, createSession, endSession, joinSessionByCode } = useSessionStore();
   const { activeGroup } = useGroupStore();
+  const userId = useAuthStore((s) => s.user?.id);
 
   const [showCreateSheet, setShowCreateSheet] = useState(false);
+  const [showJoinSheet, setShowJoinSheet] = useState(false);
   const [sessionName, setSessionName] = useState('');
+  const [joinCode, setJoinCode] = useState('');
   const [creating, setCreating] = useState(false);
+  const [joining, setJoining] = useState(false);
 
   useEffect(() => {
     if (activeGroup?.id) loadGroupSessions(activeGroup.id);
@@ -65,43 +71,92 @@ export default function SessionsScreen() {
     else toast.error('Failed to end session');
   };
 
-  const renderSession = ({ item }: { item: Session }) => (
-    <View style={styles.sessionCard}>
-      <View style={styles.sessionHeader}>
-        <Text style={styles.sessionName}>{item.name}</Text>
-        <Badge
-          label={item.is_active ? 'Active' : 'Ended'}
-          variant={item.is_active ? 'live' : 'offline'}
-          dot
-        />
+  const handleJoin = async () => {
+    if (!joinCode.trim()) { toast.error('Enter an invite code'); return; }
+    setJoining(true);
+    const session = await joinSessionByCode(joinCode.trim().toUpperCase());
+    setJoining(false);
+    if (session) {
+      setShowJoinSheet(false);
+      setJoinCode('');
+      toast.success(`Joined session "${session.name}"`);
+    } else {
+      toast.error('Invalid or expired invite code');
+    }
+  };
+
+  const handleShareInviteCode = async (item: Session) => {
+    if (!item.invite_code) return;
+    try {
+      await Share.share({
+        title: `Join session: ${item.name}`,
+        message: `Join my Stalkr session "${item.name}" with code: ${item.invite_code}`,
+      });
+    } catch {
+      // user cancelled
+    }
+  };
+
+  const renderSession = ({ item }: { item: Session }) => {
+    const isOwner = (item as any).created_by === userId;
+    return (
+      <View style={styles.sessionCard}>
+        <View style={styles.sessionHeader}>
+          <Text style={styles.sessionName}>{item.name}</Text>
+          <Badge
+            label={item.is_active ? 'Active' : 'Ended'}
+            variant={item.is_active ? 'live' : 'offline'}
+            dot
+          />
+        </View>
+        <Text style={styles.sessionMeta}>
+          Started {timeAgo(item.started_at)}
+          {item.destination_name ? ` • To: ${item.destination_name}` : ''}
+        </Text>
+        {/* Invite code row for owners with active sessions */}
+        {item.is_active && isOwner && item.invite_code && (
+          <TouchableOpacity
+            style={styles.inviteRow}
+            onPress={() => handleShareInviteCode(item)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.inviteCodeLabel}>CODE: </Text>
+            <Text style={styles.inviteCodeText}>{item.invite_code}</Text>
+            <Text style={styles.inviteShareHint}>  TAP TO SHARE</Text>
+          </TouchableOpacity>
+        )}
+        {item.is_active && (
+          <TouchableOpacity
+            style={styles.endBtn}
+            onPress={() => handleEndSession(item.id)}
+          >
+            <Text style={styles.endBtnText}>End Session</Text>
+          </TouchableOpacity>
+        )}
       </View>
-      <Text style={styles.sessionMeta}>
-        Started {timeAgo(item.started_at)}
-        {item.destination_name ? ` • To: ${item.destination_name}` : ''}
-      </Text>
-      {item.is_active && (
-        <TouchableOpacity
-          style={styles.endBtn}
-          onPress={() => handleEndSession(item.id)}
-        >
-          <Text style={styles.endBtnText}>End Session</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
         <Text style={styles.title}>Sessions</Text>
-        {activeGroup && (
+        <View style={styles.headerActions}>
           <TouchableOpacity
-            style={styles.createBtn}
-            onPress={() => setShowCreateSheet(true)}
+            style={styles.joinBtn}
+            onPress={() => setShowJoinSheet(true)}
           >
-            <Text style={styles.createBtnText}>+ New</Text>
+            <Text style={styles.joinBtnText}>Join</Text>
           </TouchableOpacity>
-        )}
+          {activeGroup && (
+            <TouchableOpacity
+              style={styles.createBtn}
+              onPress={() => setShowCreateSheet(true)}
+            >
+              <Text style={styles.createBtnText}>+ New</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {!activeGroup ? (
@@ -158,6 +213,31 @@ export default function SessionsScreen() {
           <Button label="Start Session" onPress={handleCreate} loading={creating} fullWidth size="lg" />
         </View>
       </Sheet>
+
+      <Sheet
+        visible={showJoinSheet}
+        onClose={() => { setShowJoinSheet(false); setJoinCode(''); }}
+        title="Join Session"
+        snapHeight={280}
+      >
+        <View style={styles.sheetContent}>
+          <Text style={styles.sheetHint}>Enter the invite code shared by the session host.</Text>
+          <TextInput
+            style={[styles.sheetInput, { letterSpacing: 4, textAlign: 'center' }]}
+            placeholder="ABCD1234"
+            placeholderTextColor="#5555aa"
+            value={joinCode}
+            onChangeText={setJoinCode}
+            autoCapitalize="characters"
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={handleJoin}
+            selectionColor="#22c55e"
+            maxLength={12}
+          />
+          <Button label="Join Session" onPress={handleJoin} loading={joining} fullWidth size="lg" />
+        </View>
+      </Sheet>
     </SafeAreaView>
   );
 }
@@ -174,6 +254,16 @@ const styles = StyleSheet.create({
     borderBottomColor: '#2a2a3a',
   },
   title: { color: '#e8e8f0', fontSize: 24, fontWeight: '800' },
+  headerActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  joinBtn: {
+    backgroundColor: '#1a1a24',
+    borderWidth: 1,
+    borderColor: '#2a2a3a',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  joinBtnText: { color: '#e8e8f0', fontWeight: '600', fontSize: 14 },
   createBtn: {
     backgroundColor: '#22c55e',
     paddingHorizontal: 16,
@@ -181,6 +271,17 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   createBtnText: { color: '#000', fontWeight: '700', fontSize: 14 },
+  inviteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#2a2a3a',
+  },
+  inviteCodeLabel: { color: '#8888aa', fontSize: 11, fontWeight: '700' },
+  inviteCodeText: { color: '#4ADE80', fontSize: 14, fontWeight: '900', letterSpacing: 3 },
+  inviteShareHint: { color: '#5555aa', fontSize: 10 },
   list: { padding: 16, gap: 12 },
   emptyList: { flex: 1 },
   sessionCard: {

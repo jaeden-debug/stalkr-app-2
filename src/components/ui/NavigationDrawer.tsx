@@ -352,7 +352,7 @@ export const NavigationDrawer: React.FC = () => {
               activeOpacity={0.8}
             >
               <Text style={[styles.tabText, activeTab === 'crew' && styles.tabTextActive]}>
-                CREW {groupMembers.length > 0 ? `(${groupMembers.length})` : ''}
+                MEMBERS {groupMembers.length > 0 ? `(${groupMembers.length})` : ''}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -375,7 +375,18 @@ export const NavigationDrawer: React.FC = () => {
               <>
                 {activeGroup ? (
                   <>
-                    {groupMembers.length === 0 && !membersLoading ? (
+                    {membersLoading && groupMembers.length === 0 ? (
+                      // Skeleton rows while loading
+                      [0, 1, 2].map((i) => (
+                        <View key={i} style={[styles.memberRow, { opacity: 0.4 }]}>
+                          <View style={[styles.statusDot, { backgroundColor: '#2a2a3a' }]} />
+                          <View style={[styles.avatar, { backgroundColor: '#1e1e28', borderColor: '#2a2a3a' }]} />
+                          <View style={styles.memberInfo}>
+                            <View style={{ width: 90, height: 12, backgroundColor: '#2a2a3a', borderRadius: 4 }} />
+                          </View>
+                        </View>
+                      ))
+                    ) : groupMembers.length === 0 && !membersLoading ? (
                       <View style={styles.emptyState}>
                         <Text style={styles.emptyIcon}>👥</Text>
                         <Text style={styles.emptyText}>No crew members yet.</Text>

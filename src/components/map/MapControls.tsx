@@ -14,6 +14,7 @@ export const MapControls: React.FC = memo(() => {
   const placingZone = useMapStore((s) => s.placingCircleZone);
   const polygonDraftPoints = useMapStore((s) => s.polygonDraftPoints);
   const finishPolygon = useMapStore((s) => s.finishPolygonZone);
+  const removeLastPolygonPoint = useMapStore((s) => s.removeLastPolygonPoint);
   const cancelMarker = useMapStore((s) => s.cancelMarkerPlacement);
   const cancelZone = useMapStore((s) => s.cancelZonePlacement);
 
@@ -41,6 +42,11 @@ export const MapControls: React.FC = memo(() => {
           {placingPolygon && polygonDraftPoints.length >= 3 && (
             <TouchableOpacity style={styles.finishBtn} onPress={finishPolygon} activeOpacity={0.8}>
               <Text style={styles.finishText}>Finish</Text>
+            </TouchableOpacity>
+          )}
+          {placingPolygon && polygonDraftPoints.length > 0 && (
+            <TouchableOpacity style={styles.undoBtn} onPress={removeLastPolygonPoint} activeOpacity={0.8}>
+              <Text style={styles.undoText}>Undo</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel} activeOpacity={0.8}>
@@ -101,4 +107,13 @@ const styles = StyleSheet.create({
     borderColor: '#3a3a4e',
   },
   cancelText: { color: '#e8e8f0', fontWeight: '600', fontSize: 13 },
+  undoBtn: {
+    backgroundColor: '#1a1a24',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  undoText: { color: '#f59e0b', fontWeight: '600', fontSize: 13 },
 });

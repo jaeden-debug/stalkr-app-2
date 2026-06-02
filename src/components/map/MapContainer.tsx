@@ -5,7 +5,7 @@
  */
 import React, { useCallback, useEffect, useRef } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
-import MapView, { PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Polygon } from 'react-native-maps';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { MAP_CONSTANTS } from '@/constants/map';
@@ -25,6 +25,8 @@ export const MapContainer: React.FC = () => {
   const centerTrigger = useMapStore((s) => s.centerTrigger);
   const myLocation = useMapStore((s) => s.myLocation);
   const userId = useAuthStore((s) => s.user?.id);
+  const polygonDraftPoints = useMapStore((s) => s.polygonDraftPoints);
+  const placingPolygonZone = useMapStore((s) => s.placingPolygonZone);
 
   useEffect(() => {
     if (centerTrigger > 0 && myLocation) {
@@ -74,6 +76,41 @@ export const MapContainer: React.FC = () => {
       >
         <TrailLayer />
         <ZoneLayer />
+
+        {/* ── Polygon draft overlay ── */}
+        {placingPolygonZone && polygonDraftPoints.length > 0 && (
+          <>
+            {polygonDraftPoints.length >= 2 && (
+              <Polyline
+                coordinates={polygonDraftPoints}
+                strokeColor="#22c55e"
+                strokeWidth={2}
+                lineDashPattern={[8, 4]}
+                zIndex={20}
+              />
+            )}
+            {polygonDraftPoints.length >= 3 && (
+              <Polygon
+                coordinates={polygonDraftPoints}
+                fillColor="rgba(34,197,94,0.15)"
+                strokeColor="#22c55e"
+                strokeWidth={1.5}
+                zIndex={19}
+              />
+            )}
+            {polygonDraftPoints.map((pt, idx) => (
+              <Marker
+                key={`draft-${idx}`}
+                coordinate={pt}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                zIndex={21}
+              >
+                <View style={styles.draftDot} />
+              </Marker>
+            ))}
+          </>
+        )}
         <DestinationMarker />
         <RallyPointMarker />
         <MarkerLayer />
@@ -95,4 +132,12 @@ export const MapContainer: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0f' },
+  draftDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#22c55e',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
 });

@@ -68,6 +68,14 @@ export const SelfMarkerMenu: React.FC<SelfMarkerMenuProps> = memo(({ visible, on
           )}
         </View>
 
+        {/* Location status label */}
+        <View style={[styles.statusBar, isBroadcasting ? styles.statusBarLive : styles.statusBarOff]}>
+          <View style={[styles.statusDot, { backgroundColor: isBroadcasting ? '#22c55e' : '#ef4444' }]} />
+          <Text style={[styles.statusText, { color: isBroadcasting ? '#22c55e' : '#ef4444' }]}>
+            {isBroadcasting ? 'LIVE LOCATION' : 'LAST KNOWN'}
+          </Text>
+        </View>
+
         {myLocation ? (
           <TouchableOpacity style={styles.coordBox} onPress={handleCopyCoords} activeOpacity={0.7}>
             <Text style={styles.coordLabel}>COORDINATES</Text>
@@ -106,7 +114,7 @@ export const SelfMarkerMenu: React.FC<SelfMarkerMenuProps> = memo(({ visible, on
             <Toggle value={isBroadcasting} onValueChange={setIsBroadcasting} />
           </View>
           <View style={[styles.toggleRow, styles.noBorder]}>
-            <Text style={styles.toggleLabel}>Show My Trail</Text>
+            <Text style={styles.toggleLabel}>Breadcrumb Trail</Text>
             <Toggle value={myTrailVisible} onValueChange={() => toggleTrail(userId)} />
           </View>
         </View>
@@ -144,6 +152,11 @@ const styles = StyleSheet.create({
   toggleGroup: { backgroundColor: '#12121a', borderRadius: 10, borderWidth: 1, borderColor: '#2a2a3a', overflow: 'hidden' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, borderBottomWidth: 1, borderBottomColor: '#2a2a3a' },
   noBorder: { borderBottomWidth: 0 },
+  statusBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1 },
+  statusBarLive: { backgroundColor: 'rgba(34,197,94,0.08)', borderColor: 'rgba(34,197,94,0.3)' },
+  statusBarOff: { backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.3)' },
+  statusDot: { width: 7, height: 7, borderRadius: 3.5 },
+  statusText: { fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
   toggleLabel: { color: '#e8e8f0', fontSize: 15 },
   actions: { gap: 10 },
   actionBtn: { backgroundColor: '#1a1a24', borderRadius: 10, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#2a2a3a' },

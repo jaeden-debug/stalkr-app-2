@@ -25,6 +25,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 export function useGoDark() {
   const isBroadcasting = useLocationStore((s) => s.isBroadcasting);
   const setIsBroadcasting = useLocationStore((s) => s.setIsBroadcasting);
+  const setGroupBroadcasting = useLocationStore((s) => s.setGroupBroadcasting);
 
   const activeGroupId = useGroupStore((s) => s.activeGroupId);
   const groups = useGroupStore((s) => s.groups);
@@ -59,12 +60,17 @@ export function useGoDark() {
 
     setIsLoading(true);
     try {
+      const newVal = !isBroadcasting;
       // Flip — useLocationTracker handles the Supabase write automatically
-      setIsBroadcasting(!isBroadcasting);
+      setIsBroadcasting(newVal);
+      // Persist per-group state
+      if (activeGroupId) {
+        setGroupBroadcasting(activeGroupId, newVal);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [activeGroupId, isBroadcasting, isEnforced, setIsBroadcasting]);
+  }, [activeGroupId, isBroadcasting, isEnforced, setIsBroadcasting, setGroupBroadcasting]);
 
   return { isDark, isEnforced, isLoading, toggle };
 }

@@ -129,7 +129,7 @@ export const TacticalHud: React.FC = () => {
         )}
 
         {/* Broadcasting status */}
-        <View style={styles.broadcastPill} pointerEvents="none">
+        <View style={[styles.broadcastPill, !isBroadcasting && styles.broadcastPillOff]} pointerEvents="none">
           {isBroadcasting ? (
             <>
               <Animated.View style={[styles.broadcastDot, { opacity: livePulse }]} />
@@ -138,7 +138,7 @@ export const TacticalHud: React.FC = () => {
           ) : (
             <>
               <View style={styles.broadcastDotOff} />
-              <Text style={styles.broadcastLabelOff}>OFF</Text>
+              <Text style={styles.broadcastLabelOff}>OFFLINE</Text>
             </>
           )}
         </View>
@@ -146,21 +146,32 @@ export const TacticalHud: React.FC = () => {
 
       {/* ── Right-side controls ── */}
       <View style={styles.rightControls} pointerEvents="box-none">
+        {/* Recenter — green circle with crosshair text */}
         <TouchableOpacity
-          style={styles.controlBtn}
+          style={styles.recenterBtn}
           onPress={handleCenter}
           activeOpacity={0.75}
         >
-          <Text style={styles.controlIcon}>⊕</Text>
+          <Text style={styles.recenterIcon}>◎</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.controlBtn, isSatellite && styles.controlBtnActive]}
-          onPress={toggleSatellite}
-          activeOpacity={0.75}
-        >
-          <Text style={styles.controlIcon}>🛰</Text>
-        </TouchableOpacity>
+        {/* Satellite toggle — MAP / SAT pill */}
+        <View style={styles.satToggleContainer}>
+          <TouchableOpacity
+            style={[styles.satOption, !isSatellite && styles.satOptionActive]}
+            onPress={() => isSatellite && toggleSatellite()}
+            activeOpacity={0.75}
+          >
+            <Text style={[styles.satOptionText, !isSatellite && styles.satOptionTextActive]}>MAP</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.satOption, isSatellite && styles.satOptionActive]}
+            onPress={() => !isSatellite && toggleSatellite()}
+            activeOpacity={0.75}
+          >
+            <Text style={[styles.satOptionText, isSatellite && styles.satOptionTextActive]}>SAT</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* ── Active session pill ── */}
@@ -292,8 +303,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2a2a3a',
     gap: 5,
-    minWidth: 56,
+    minWidth: 64,
     justifyContent: 'center',
+  },
+  broadcastPillOff: {
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderColor: 'rgba(239,68,68,0.5)',
   },
   broadcastDot: {
     width: 7,
@@ -305,7 +320,7 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    backgroundColor: '#4a4a60',
+    backgroundColor: '#ef4444',
   },
   broadcastLabel: {
     color: '#22c55e',
@@ -314,7 +329,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
   },
   broadcastLabelOff: {
-    color: '#4a4a60',
+    color: '#ef4444',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.2,
@@ -326,28 +341,53 @@ const styles = StyleSheet.create({
     right: 14,
     top: '40%',
     gap: 10,
+    alignItems: 'center',
   },
-  controlBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(10,10,15,0.9)',
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
+  // Recenter button — solid green circle
+  recenterBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#22c55e',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  controlBtnActive: {
-    borderColor: '#22c55e',
-    backgroundColor: 'rgba(34,197,94,0.12)',
+  recenterIcon: {
+    fontSize: 22,
+    color: '#ffffff',
+    fontWeight: '900',
   },
-  controlIcon: {
-    fontSize: 20,
+  // Satellite toggle pill
+  satToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(10,10,15,0.9)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2a2a3a',
+    overflow: 'hidden',
+  },
+  satOption: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  satOptionActive: {
+    backgroundColor: '#22c55e',
+  },
+  satOptionText: {
+    color: '#8888aa',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  satOptionTextActive: {
+    color: '#000000',
   },
 
   // Session pill

@@ -45,7 +45,7 @@ export const ZoneLayer: React.FC = memo(() => {
   );
   const polygonIds = useMapStore((s) =>
     s.savedPlaces
-      .filter((p) => p.shape_type === 'polygon' && p.polygon_coords.length >= 3)
+      .filter((p) => p.shape_type === 'polygon' && p.polygon_coords != null && Array.isArray(p.polygon_coords) && p.polygon_coords.length >= 3)
       .map((p) => p.id),
   );
 

@@ -3,7 +3,7 @@
  * Owners/creators can toggle notify_on_arrival and notify_on_leave inline.
  */
 import React, { memo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Sheet } from '@/components/ui/Sheet';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -26,8 +26,23 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
 
   const [savingArrival, setSavingArrival] = useState(false);
   const [savingLeave, setSavingLeave] = useState(false);
+  const [lingerMinutes, setLingerMinutes] = useState<string>('');
+  const [quietStart, setQuietStart] = useState<string>('');
+  const [quietEnd, setQuietEnd] = useState<string>('');
+  const [zoneType, setZoneType] = useState<string>('');
 
   const zone = savedPlaces.find((z) => z.id === zoneId);
+
+  // Sync local state when zone changes
+  React.useEffect(() => {
+    if (zone) {
+      setLingerMinutes(zone.alert_rules?.stay_too_long_minutes?.toString() ?? '');
+      setQuietStart(zone.alert_rules?.quiet_hours_start ?? '');
+      setQuietEnd(zone.alert_rules?.quiet_hours_end ?? '');
+      setZoneType(zone.type ?? '');
+    }
+  }, [zone?.id]);
+
   if (!zone) return null;
 
   const isOwner = zone.created_by === userId;
@@ -45,6 +60,21 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
     updateSavedPlaceInStore(zone.id, { notify_on_leave: value });
     await updateSavedPlace(zone.id, { notify_on_leave: value });
     setSavingLeave(false);
+  };
+
+  const handleSaveAdvancedRules = async () => {
+    const mins = parseInt(lingerMinutes, 10);
+    const updates: Partial<typeof zone> = {
+      alert_rules: {
+        ...zone.alert_rules,
+        stay_too_long_minutes: !isNaN(mins) && mins > 0 ? mins : undefined,
+        quiet_hours_start: quietStart.trim() || undefined,
+        quiet_hours_end: quietEnd.trim() || undefined,
+      },
+      type: zoneType as any || zone.type,
+    };
+    updateSavedPlaceInStore(zone.id, updates);
+    await updateSavedPlace(zone.id, updates);
   };
 
   const handleDelete = () => {
@@ -133,13 +163,80 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
             )}
           </View>
 
-          {zone.alert_rules?.stay_too_long_minutes && (
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Stay-too-long</Text>
-              <Text style={styles.detailValue}>{zone.alert_rules.stay_too_long_minutes} min</Text>
-            </View>
-          )}
         </View>
+
+        {/* Advanced alert rules — editable for owner */}
+        {isOwner && (
+          <View style={styles.alertsBox}>
+            <Text style={styles.alertsTitle}>ADVANCED RULES</Text>
+
+            {/* Linger alert */}
+            <View style={styles.alertToggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.alertToggleLabel}>Linger Alert (minutes)</Text>
+                <Text style={styles.alertToggleSub}>Alert if inside longer than this</Text>
+              </View>
+              <TextInput
+                style={styles.ruleInput}
+                value={lingerMinutes}
+                onChangeText={setLingerMinutes}
+                onEndEditing={handleSaveAdvancedRules}
+                keyboardType="number-pad"
+                placeholder="—"
+                placeholderTextColor="#4a4a60"
+                maxLength={4}
+              />
+            </View>
+
+            {/* Quiet hours */}
+            <View style={styles.alertToggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.alertToggleLabel}>Quiet Hours</Text>
+                <Text style={styles.alertToggleSub}>No alerts between these times (HH:MM)</Text>
+              </View>
+              <View style={styles.timeInputRow}>
+                <TextInput
+                  style={styles.ruleInput}
+                  value={quietStart}
+                  onChangeText={setQuietStart}
+                  onEndEditing={handleSaveAdvancedRules}
+                  placeholder="22:00"
+                  placeholderTextColor="#4a4a60"
+                  maxLength={5}
+                />
+                <Text style={styles.timeSep}>—</Text>
+                <TextInput
+                  style={styles.ruleInput}
+                  value={quietEnd}
+                  onChangeText={setQuietEnd}
+                  onEndEditing={handleSaveAdvancedRules}
+                  placeholder="06:00"
+                  placeholderTextColor="#4a4a60"
+                  maxLength={5}
+                />
+              </View>
+            </View>
+
+            {/* Zone type selector */}
+            <View style={[styles.alertToggleRow, { borderBottomWidth: 0 }]}>
+              <Text style={styles.alertToggleLabel}>Zone Type</Text>
+            </View>
+            <View style={styles.zoneTypeRow}>
+              {(['safe_zone', 'danger_zone', 'camp', 'custom'] as const).map((t) => (
+                <TouchableOpacity
+                  key={t}
+                  style={[styles.zoneTypePill, zoneType === t && styles.zoneTypePillActive]}
+                  onPress={() => { setZoneType(t); setTimeout(handleSaveAdvancedRules, 100); }}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.zoneTypePillText, zoneType === t && styles.zoneTypePillTextActive]}>
+                    {t.replace('_', ' ').toUpperCase()}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
 
         <Text style={styles.meta}>Created {timeAgo(zone.created_at)}</Text>
 
@@ -192,4 +289,33 @@ const styles = StyleSheet.create({
   on: { color: '#22c55e' },
   off: { color: '#6b7280' },
   meta: { color: '#5555aa', fontSize: 12 },
+  ruleInput: {
+    backgroundColor: '#12121a',
+    borderWidth: 1,
+    borderColor: '#2a2a3a',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    color: '#e8e8f0',
+    fontSize: 13,
+    minWidth: 56,
+    textAlign: 'center',
+  },
+  timeInputRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  timeSep: { color: '#8888aa', fontSize: 13 },
+  zoneTypeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingTop: 4 },
+  zoneTypePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2a2a3a',
+    backgroundColor: '#12121a',
+  },
+  zoneTypePillActive: {
+    backgroundColor: 'rgba(34,197,94,0.12)',
+    borderColor: '#22c55e',
+  },
+  zoneTypePillText: { color: '#8888aa', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  zoneTypePillTextActive: { color: '#22c55e' },
 });
