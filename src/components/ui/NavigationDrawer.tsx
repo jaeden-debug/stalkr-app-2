@@ -2,12 +2,18 @@
  * NavigationDrawer — Stalkr tactical bottom-sheet drawer.
  * Aesthetic: BlurView glass, ALL CAPS weight-900, Ionicons, #4ADE80 green.
  *
- * Collapsed: crew name + live count + GO DARK / GO LIVE toggle
- * Expanded:  MEMBERS tab | CREWS tab | quick-action grid | stealth card
+ * Layout (premium 3-zone, fixed height — renders instantly, no mount wait):
+ *   ── Collapsed peek: crew name + live count + GO DARK / GO LIVE pill
+ *   ── Expanded (slides 3/4 up, blurs everything behind it):
+ *        TOP    → NEW CREW / NEW JOURNEY create buttons
+ *        CENTER → GO DARK / GO LIVE toggle (the hero)
+ *        BOTTOM → quick actions: MARK · ZONES · INVITE · SETTINGS
  */
 import BottomSheet, {
+  BottomSheetBackdrop,
   BottomSheetScrollView,
   BottomSheetView,
+  type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,14 +30,21 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
   Platform,
+  SafeAreaView,
+  ScrollView,
   Share,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as Contacts from 'expo-contacts';
+import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useLocationStore } from '@/store/useLocationStore';
@@ -39,16 +52,26 @@ import { useMapStore } from '@/store/useMapStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useGoDark } from '@/hooks/useGoDark';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import { getCrewColor } from '@/constants/map';
+import { getLocationStatus } from '@/utils/time';
+import { buildWatchUrl } from '@/services/sessions';
 import { MARKER_TYPES } from '@/constants/markerTypes';
-import { timeAgo, getLocationStatus } from '@/utils/time';
-import { getDistance, formatDistance } from '@/utils/distance';
 import { C } from '@/constants/theme';
 import type { GroupMember } from '@/types/models';
 import type { MarkerType } from '@/types/database';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const COLLAPSED_H = 118;
+const EXPANDED_H = Math.round(SCREEN_H * 0.75); // slides 3/4 up the viewport
+
+// Places Autocomplete uses the Google Places web API — needs a key with the
+// Places API enabled. Falls back to the iOS maps key if the general one is unset.
+const GOOGLE_API_KEY =
+  process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+  process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY ||
+  '';
+
+// Minimal contact shape — decoupled from expo-contacts' versioned Contact type
+type PickedContact = { id: string; name?: string | null; [key: string]: any };
 
 // Ionicons marker map — no emojis
 const MARKER_ICONS: Record<string, React.ComponentProps<typeof Ionicons>['name']> = {
@@ -81,6 +104,14 @@ export function openDrawer()  { _sheetRef?.current?.snapToIndex(1); }
 export function closeDrawer() { _sheetRef?.current?.snapToIndex(0); }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function getDisplayName(m: GroupMember): string {
+  return (
+    m.nickname_override ??
+    m.profile?.nickname ??
+    m.profile?.display_name ??
+    'Unknown'
+  );
+}
 function getInitials(m: GroupMember): string {
   if (m.initials_override) return m.initials_override.toUpperCase().slice(0, 2);
   if (m.profile?.initials) return m.profile.initials.toUpperCase().slice(0, 2);
@@ -89,14 +120,6 @@ function getInitials(m: GroupMember): string {
   return parts.length >= 2
     ? `${parts[0][0]}${parts[1][0]}`.toUpperCase()
     : name.slice(0, 2).toUpperCase() || '??';
-}
-function getDisplayName(m: GroupMember): string {
-  return (
-    m.nickname_override ??
-    m.profile?.nickname ??
-    m.profile?.display_name ??
-    'Unknown'
-  );
 }
 
 // ─── Pulse hook ───────────────────────────────────────────────────────────────
@@ -116,90 +139,6 @@ function usePulse(active: boolean) {
   return anim;
 }
 
-// ─── Member row ───────────────────────────────────────────────────────────────
-interface MemberRowProps {
-  member: GroupMember;
-  isMe: boolean;
-  liveLocation?: { status: string; battery_level: number | null; updated_at: string } | null;
-  myLat?: number;
-  myLng?: number;
-}
-
-const MemberRow: React.FC<MemberRowProps> = ({ member, isMe, liveLocation, myLat, myLng }) => {
-  const initials  = getInitials(member);
-  const name      = getDisplayName(member);
-  const color     = getCrewColor(member.user_id);
-  const status    = liveLocation ? getLocationStatus(liveLocation.updated_at) : member.status;
-  const isLive    = status === 'live';
-  const lastSeen  = liveLocation?.updated_at ? timeAgo(liveLocation.updated_at) : null;
-
-  const distText = useMemo(() => {
-    const loc = liveLocation as any;
-    if (!myLat || !myLng || !loc?.latitude || !loc?.longitude) return null;
-    return formatDistance(getDistance(
-      { latitude: myLat, longitude: myLng },
-      { latitude: loc.latitude, longitude: loc.longitude },
-    ));
-  }, [myLat, myLng, (liveLocation as any)?.latitude, (liveLocation as any)?.longitude]);
-
-  return (
-    <View style={ms.row}>
-      {/* Status dot */}
-      <View style={[ms.dot, {
-        backgroundColor: isLive ? C.green : status === 'stale' ? C.amber : 'rgba(255,255,255,0.2)',
-      }]} />
-
-      {/* Avatar */}
-      <View style={[ms.avatar, { backgroundColor: color + '22', borderColor: color + '55' }]}>
-        <Text style={[ms.initials, { color }]}>{initials}</Text>
-      </View>
-
-      {/* Info */}
-      <View style={ms.info}>
-        <Text style={ms.name} numberOfLines={1}>
-          {isMe ? `${name.toUpperCase()} (YOU)` : name.toUpperCase()}
-        </Text>
-        <View style={ms.metaRow}>
-          {member.role !== 'member' && (
-            <Text style={[ms.badge, { color: C.green }]}>{member.role.toUpperCase()} · </Text>
-          )}
-          <Text style={[ms.status, { color: isLive ? C.green : C.amber }]}>
-            {isLive ? 'LIVE' : lastSeen ? `${lastSeen}` : 'OFFLINE'}
-          </Text>
-          {distText && <Text style={ms.dist}> · {distText}</Text>}
-        </View>
-      </View>
-
-      {/* Battery */}
-      {liveLocation?.battery_level != null && (
-        <View style={ms.battery}>
-          <Ionicons
-            name={liveLocation.battery_level > 50 ? 'battery-half' : 'battery-dead'}
-            size={13}
-            color={liveLocation.battery_level < 20 ? C.red : 'rgba(255,255,255,0.4)'}
-          />
-          <Text style={ms.battText}>{liveLocation.battery_level}%</Text>
-        </View>
-      )}
-    </View>
-  );
-};
-
-const ms = StyleSheet.create({
-  row:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 20, gap: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
-  dot:     { width: 7, height: 7, borderRadius: 4, flexShrink: 0 },
-  avatar:  { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  initials:{ fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
-  info:    { flex: 1 },
-  name:    { color: C.textPrimary, fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  badge:   { fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
-  status:  { fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
-  dist:    { color: 'rgba(255,255,255,0.4)', fontSize: 9, fontWeight: '700' },
-  battery: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  battText:{ color: 'rgba(255,255,255,0.4)', fontSize: 9, fontWeight: '700' },
-});
-
 // ─── NavigationDrawer ─────────────────────────────────────────────────────────
 export const NavigationDrawer: React.FC = () => {
   const sheetRef = useRef<BottomSheet>(null);
@@ -210,26 +149,26 @@ export const NavigationDrawer: React.FC = () => {
     return () => { _sheetRef = null; };
   }, []);
 
-  const snapPoints = useMemo(() => [COLLAPSED_H, Math.round(SCREEN_H * 0.88)], []);
-  const [idx, setIdx]         = useState(0);
-  const [tab, setTab]         = useState<'crew' | 'groups'>('crew');
+  const snapPoints = useMemo(() => [COLLAPSED_H, EXPANDED_H], []);
+  const [idx, setIdx]               = useState(0);
   const [markerModal, setMarkerModal] = useState(false);
   const [zoneModal, setZoneModal]     = useState(false);
+  const [crewModal, setCrewModal]     = useState(false);
+  const [journeyModal, setJourneyModal] = useState(false);
 
   // ── Stores ──────────────────────────────────────────────────────────────────
-  const userId    = useAuthStore((s) => s.user?.id);
-  const groups    = useGroupStore((s) => s.groups);
-  const activeGroupId  = useGroupStore((s) => s.activeGroupId);
-  const groupMembers   = useGroupStore((s) => s.groupMembers);
-  const membersLoading = useGroupStore((s) => s.membersLoading);
+  const userId           = useAuthStore((s) => s.user?.id);
+  const groups           = useGroupStore((s) => s.groups);
+  const activeGroupId    = useGroupStore((s) => s.activeGroupId);
+  const groupMembers     = useGroupStore((s) => s.groupMembers);
   const setActiveGroupId = useGroupStore((s) => s.setActiveGroupId);
+  const createGroup      = useGroupStore((s) => s.createGroup);
   const loadGroupMembers = useGroupStore((s) => s.loadGroupMembers);
   const activeGroup = useMemo(() => groups.find((g) => g.id === activeGroupId) ?? null, [groups, activeGroupId]);
 
   const isBroadcasting = useLocationStore((s) => s.isBroadcasting);
   const crewLocations  = useLocationStore((s) => s.crewLocations);
-  const myLocation     = useMapStore((s) => s.myLocation);
-  const activeSession  = useSessionStore((s) => s.activeSession);
+  const createSession  = useSessionStore((s) => s.createSession);
 
   const { isDark, isEnforced, isLoading: darkLoading, toggle: toggleDark } = useGoDark();
   const { track } = useAnalytics();
@@ -248,7 +187,26 @@ export const NavigationDrawer: React.FC = () => {
 
   const livePulse = usePulse(isBroadcasting && !isDark);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
+  // ── Create-crew form state ───────────────────────────────────────────────────
+  const [crewName, setCrewName]   = useState('');
+  const [enforce, setEnforce]     = useState(false);
+  const [creatingCrew, setCreatingCrew] = useState(false);
+
+  // ── New-journey form state ───────────────────────────────────────────────────
+  const [journeyName, setJourneyName]   = useState('');
+  const [journeyDest, setJourneyDest]   = useState('');
+  const [journeyDestCoords, setJourneyDestCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [creatingJourney, setCreatingJourney] = useState(false);
+  const journeyPlacesRef = useRef<any>(null);
+
+  // ── Emergency-contacts (expo-contacts) state ─────────────────────────────────
+  const [contactList, setContactList]       = useState<PickedContact[]>([]);
+  const [allContacts, setAllContacts]       = useState<PickedContact[]>([]);
+  const [showContactPicker, setShowContactPicker] = useState(false);
+  const [contactSearch, setContactSearch]   = useState('');
+  const syncInFlight = useRef(false);
+
+  // ── Handlers ─────────────────────────────────────────────────────────────────
   const handleGoDark = useCallback(() => {
     if (isEnforced || darkLoading) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -257,7 +215,10 @@ export const NavigationDrawer: React.FC = () => {
   }, [isDark, isEnforced, darkLoading, toggleDark, track]);
 
   const handleShareInvite = useCallback(async () => {
-    if (!activeGroup?.invite_code) return;
+    if (!activeGroup?.invite_code) {
+      Alert.alert('NO ACTIVE CREW', 'Select or create a crew before sending an invite.');
+      return;
+    }
     try {
       await Share.share({
         title: `Join ${activeGroup.name} on Stalkr`,
@@ -267,13 +228,6 @@ export const NavigationDrawer: React.FC = () => {
       track({ name: 'invite_shared', properties: { method: 'share_sheet' } });
     } catch {}
   }, [activeGroup, track]);
-
-  const handleSelectGroup = useCallback((groupId: string) => {
-    Haptics.selectionAsync();
-    setActiveGroupId(groupId);
-    sheetRef.current?.snapToIndex(0);
-    setTab('crew');
-  }, [setActiveGroupId]);
 
   const handleSelectMarkerType = useCallback((type: MarkerType) => {
     setMarkerModal(false);
@@ -291,7 +245,145 @@ export const NavigationDrawer: React.FC = () => {
     else useMapStore.getState().startPolygonZonePlacement();
   }, []);
 
-  const isExpanded = idx > 0;
+  // ── NEW CREW ─────────────────────────────────────────────────────────────────
+  const openCrewSheet = useCallback(() => {
+    setCrewName('');
+    setEnforce(false);
+    setCrewModal(true);
+  }, []);
+
+  const handleCreateCrew = useCallback(async () => {
+    const name = crewName.trim();
+    if (!name) { Alert.alert('CREW NAME REQUIRED', 'Name your crew before generating an invite.'); return; }
+    setCreatingCrew(true);
+    try {
+      const group = await createGroup(name, 'custom', enforce);
+      if (!group) { Alert.alert('CREW ERROR', 'Crew could not be created. Try again.'); return; }
+      setActiveGroupId(group.id);
+      track({ name: 'group_created' });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setCrewModal(false);
+      setCrewName('');
+      Alert.alert('CREW CREATED', `${group.name} is now active.\nInvite code: ${group.invite_code}`);
+    } catch (e: any) {
+      Alert.alert('CREW ERROR', e?.message ?? 'Unable to create crew.');
+    } finally {
+      setCreatingCrew(false);
+    }
+  }, [crewName, enforce, createGroup, setActiveGroupId, track]);
+
+  // ── NEW JOURNEY ──────────────────────────────────────────────────────────────
+  const openJourneySheet = useCallback(() => {
+    setJourneyName('');
+    setJourneyDest('');
+    setJourneyDestCoords(null);
+    setContactList([]);
+    setContactSearch('');
+    journeyPlacesRef.current?.setAddressText?.('');
+    setJourneyModal(true);
+  }, []);
+
+  // Pull device contacts → open the multi-select picker (matches old project)
+  const syncContacts = useCallback(async () => {
+    if (syncInFlight.current) return;
+    syncInFlight.current = true;
+    Keyboard.dismiss();
+    try {
+      const { status } = await Contacts.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('PERMISSION DENIED', 'Cannot access your contacts list.');
+        return;
+      }
+      const { data } = await Contacts.getContactsAsync({
+        fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails],
+      });
+      const cleaned: PickedContact[] = data
+        .filter((c) => c.name || c.phoneNumbers?.length || c.emails?.length)
+        .map((c, i) => ({
+          ...c,
+          id: String((c as any).id ?? (c as any).lookupKey ?? c.name ?? i),
+        }))
+        .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+
+      if (cleaned.length === 0) {
+        Alert.alert('NO CONTACTS', 'No contacts were found on this device.');
+        return;
+      }
+      setAllContacts(cleaned);
+      setContactSearch('');
+      setShowContactPicker(true);
+    } finally {
+      syncInFlight.current = false;
+    }
+  }, []);
+
+  const contactKey = useCallback(
+    (c: PickedContact) => String((c as any).id ?? (c as any).lookupKey ?? c.name ?? ''),
+    [],
+  );
+
+  const toggleContact = useCallback((c: PickedContact) => {
+    const key = contactKey(c);
+    setContactList((prev) =>
+      prev.some((x) => contactKey(x) === key)
+        ? prev.filter((x) => contactKey(x) !== key)
+        : [...prev, c],
+    );
+  }, [contactKey]);
+
+  const handleCreateJourney = useCallback(async () => {
+    const name = journeyName.trim();
+    if (!name) { Alert.alert('JOURNEY NAME REQUIRED', 'Name this journey before starting.'); return; }
+    setCreatingJourney(true);
+    try {
+      const session = await createSession({
+        name,
+        groupId: activeGroup?.id ?? null,
+        destinationName: journeyDest.trim() || undefined,
+        destinationLat: journeyDestCoords?.lat,
+        destinationLng: journeyDestCoords?.lng,
+        notifyOnEnd: true,
+      });
+
+      if (!session) { Alert.alert('JOURNEY ERROR', 'Unable to start journey.'); return; }
+
+      track({ name: 'session_started' });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setJourneyModal(false);
+      sheetRef.current?.snapToIndex(0);
+
+      // Auto-open share sheet — send the watch link to the chosen emergency contacts
+      const url = buildWatchUrl(session.watch_token);
+      const destText = session.destination_name ? ` to ${session.destination_name}` : '';
+      const contactNames = contactList.map((c) => c.name).filter(Boolean).join(', ');
+      const contactLine = contactNames ? `\n\nNotifying: ${contactNames}` : '';
+      try {
+        await Share.share({
+          title: `Watch my journey${destText}`,
+          message: `${session.traveler_name ?? 'Someone'} is on their way${destText}. Follow live: ${url}${contactLine}`,
+          url,
+        });
+      } catch {}
+    } catch (e: any) {
+      Alert.alert('JOURNEY ERROR', e?.message ?? 'Unable to start journey.');
+    } finally {
+      setCreatingJourney(false);
+    }
+  }, [journeyName, journeyDest, journeyDestCoords, contactList, createSession, activeGroup, track]);
+
+  // ── Backdrop: blur everything behind the drawer, fade in on expand ──────────
+  const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop
+      {...props}
+      appearsOnIndex={1}
+      disappearsOnIndex={0}
+      pressBehavior="collapse"
+      opacity={1}
+      style={[props.style, styles.backdrop]}
+    >
+      <BlurView intensity={32} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+    </BottomSheetBackdrop>
+  ), []);
 
   return (
     <>
@@ -301,6 +393,8 @@ export const NavigationDrawer: React.FC = () => {
         snapPoints={snapPoints}
         onChange={setIdx}
         enablePanDownToClose={false}
+        enableDynamicSizing={false}
+        backdropComponent={renderBackdrop}
         backgroundComponent={({ style }) => (
           <BlurView intensity={95} tint="dark" style={[style, styles.glass]} />
         )}
@@ -315,202 +409,130 @@ export const NavigationDrawer: React.FC = () => {
         )}
         style={{ zIndex: 5000, elevation: 5000 }}
       >
-
-        {/* ── Collapsed peek ── */}
-        <BottomSheetView style={styles.peek}>
+        {/* Content is ALWAYS mounted → expands instantly, no render wait */}
+        <BottomSheetView style={styles.container}>
+          {/* ── Collapsed peek (always visible) ── */}
           <TouchableOpacity
-            style={styles.peekLeft}
-            onPress={() => sheetRef.current?.snapToIndex(1)}
-            activeOpacity={0.8}
+            style={styles.peek}
+            activeOpacity={0.9}
+            onPress={() => sheetRef.current?.snapToIndex(idx === 0 ? 1 : 0)}
           >
-            <Animated.View style={[styles.peekDot, {
-              backgroundColor: isDark ? C.red : C.green,
-              opacity: isDark ? 1 : livePulse,
-            }]} />
-            <View>
-              <Text style={styles.peekCrew} numberOfLines={1}>
-                {activeGroup?.name?.toUpperCase() ?? 'NO ACTIVE CREW'}
-              </Text>
-              {liveCount > 0 && (
-                <Text style={styles.peekSub}>{liveCount} LIVE</Text>
-              )}
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.peekToggle, isDark && styles.peekToggleDark]}
-            onPress={handleGoDark}
-            disabled={isEnforced || darkLoading}
-            activeOpacity={0.8}
-          >
-            <Ionicons
-              name={isDark ? 'eye-off' : 'radio'}
-              size={13}
-              color={isDark ? C.red : C.green}
-            />
-            <Text style={[styles.peekToggleText, { color: isDark ? C.red : C.green }]}>
-              {darkLoading ? '...' : isDark ? 'DARK' : 'LIVE'}
-            </Text>
-          </TouchableOpacity>
-        </BottomSheetView>
-
-        {/* ── Expanded ── */}
-        {isExpanded && (
-          <>
-            {/* Tab bar */}
-            <View style={styles.tabBar}>
-              {(['crew', 'groups'] as const).map((t) => (
-                <TouchableOpacity
-                  key={t}
-                  style={[styles.tabItem, tab === t && styles.tabItemActive]}
-                  onPress={() => setTab(t)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-                    {t === 'crew'
-                      ? `MEMBERS${groupMembers.length ? ` (${groupMembers.length})` : ''}`
-                      : `CREWS${groups.length ? ` (${groups.length})` : ''}`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            <View style={styles.peekLeft}>
+              <Animated.View style={[styles.peekDot, {
+                backgroundColor: isDark ? C.red : C.green,
+                opacity: isDark ? 1 : livePulse,
+              }]} />
+              <View>
+                <Text style={styles.peekCrew} numberOfLines={1}>
+                  {activeGroup?.name?.toUpperCase() ?? 'NO ACTIVE CREW'}
+                </Text>
+                {liveCount > 0 && <Text style={styles.peekSub}>{liveCount} LIVE</Text>}
+              </View>
             </View>
 
-            <BottomSheetScrollView
-              contentContainerStyle={styles.scroll}
-              showsVerticalScrollIndicator={false}
+            <TouchableOpacity
+              style={[styles.peekToggle, isDark && styles.peekToggleDark]}
+              onPress={handleGoDark}
+              disabled={isEnforced || darkLoading}
+              activeOpacity={0.8}
             >
-              {/* MEMBERS TAB */}
-              {tab === 'crew' && (
-                activeGroup ? (
-                  membersLoading && groupMembers.length === 0 ? (
-                    [0,1,2].map((i) => (
-                      <View key={i} style={[ms.row, { opacity: 0.3 }]}>
-                        <View style={[ms.dot, { backgroundColor: '#333' }]} />
-                        <View style={[ms.avatar, { backgroundColor: '#1a1a28', borderColor: '#2a2a3a' }]} />
-                        <View style={[ms.info]}>
-                          <View style={{ width: 80, height: 10, backgroundColor: '#2a2a3a', borderRadius: 4 }} />
-                        </View>
-                      </View>
-                    ))
-                  ) : groupMembers.length === 0 ? (
-                    <View style={styles.empty}>
-                      <Ionicons name="people-outline" size={36} color="rgba(255,255,255,0.15)" />
-                      <Text style={styles.emptyTitle}>NO CREW MEMBERS</Text>
-                      <Text style={styles.emptySub}>Share your invite code to add people.</Text>
-                    </View>
-                  ) : (
-                    groupMembers.map((m) => (
-                      <MemberRow
-                        key={m.id}
-                        member={m}
-                        isMe={m.user_id === userId}
-                        liveLocation={crewLocations[m.user_id] as any ?? null}
-                        myLat={myLocation?.latitude}
-                        myLng={myLocation?.longitude}
-                      />
-                    ))
-                  )
-                ) : (
-                  <View style={styles.empty}>
-                    <Ionicons name="radio-outline" size={36} color="rgba(255,255,255,0.15)" />
-                    <Text style={styles.emptyTitle}>NO ACTIVE CREW</Text>
-                    <Text style={styles.emptySub}>Select or create a crew below.</Text>
-                  </View>
-                )
-              )}
+              <Ionicons name={isDark ? 'eye-off' : 'radio'} size={13} color={isDark ? C.red : C.green} />
+              <Text style={[styles.peekToggleText, { color: isDark ? C.red : C.green }]}>
+                {darkLoading ? '...' : isDark ? 'DARK' : 'LIVE'}
+              </Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
 
-              {/* CREWS TAB */}
-              {tab === 'groups' && (
-                groups.length === 0 ? (
-                  <View style={styles.empty}>
-                    <Ionicons name="people-circle-outline" size={36} color="rgba(255,255,255,0.15)" />
-                    <Text style={styles.emptyTitle}>NO CREWS YET</Text>
-                    <Text style={styles.emptySub}>Create or join a crew to get started.</Text>
-                  </View>
-                ) : (
-                  groups.map((g) => (
-                    <TouchableOpacity
-                      key={g.id}
-                      style={[styles.groupRow, g.id === activeGroupId && styles.groupRowActive]}
-                      onPress={() => handleSelectGroup(g.id)}
-                      activeOpacity={0.75}
-                    >
-                      <View style={styles.groupRowLeft}>
-                        {g.id === activeGroupId && (
-                          <View style={styles.groupActiveDot} />
-                        )}
-                        <View>
-                          <Text style={[styles.groupName, g.id === activeGroupId && styles.groupNameActive]} numberOfLines={1}>
-                            {g.name.toUpperCase()}
-                          </Text>
-                          <Text style={styles.groupMeta}>
-                            {g.type?.toUpperCase() ?? 'CUSTOM'}
-                            {g.tracking_mode === 'enforced' ? ' · ENFORCED' : ''}
-                          </Text>
-                        </View>
-                      </View>
-                      {g.id === activeGroupId && (
-                        <View style={styles.groupActiveBadge}>
-                          <Text style={styles.groupActiveBadgeText}>ACTIVE</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  ))
-                )
-              )}
+          {/* ── Expanded body: 3 zones (scrolls only if a short screen needs it) ── */}
+          <BottomSheetScrollView
+            style={styles.bodyScroll}
+            contentContainerStyle={styles.body}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* TOP ZONE — create buttons (same style as GO DARK / GO LIVE) */}
+            <View style={styles.createRow}>
+              <TouchableOpacity
+                style={[styles.createBtn, styles.createBtnCrew]}
+                onPress={openCrewSheet}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="people" size={18} color={C.green} />
+                <Text style={[styles.createBtnText, { color: C.green }]}>NEW CREW</Text>
+              </TouchableOpacity>
 
-              {/* ── Divider ── */}
-              <View style={styles.divider} />
+              <TouchableOpacity
+                style={[styles.createBtn, styles.createBtnJourney]}
+                onPress={openJourneySheet}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="navigate" size={18} color={C.blue} />
+                <Text style={[styles.createBtnText, { color: C.blue }]}>NEW JOURNEY</Text>
+              </TouchableOpacity>
+            </View>
 
-              {/* ── STEALTH CARD ── */}
-              <View style={[styles.stealthCard, isDark && styles.stealthCardDark]}>
-                <View style={styles.stealthTop}>
-                  <Animated.View style={[styles.stealthDot, {
-                    backgroundColor: isDark ? C.red : C.green,
-                    opacity: isDark ? 1 : livePulse,
-                  }]} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.stealthStatus, { color: isDark ? C.red : C.green }]}>
+            {/* CENTER ZONE — GO DARK / GO LIVE hero */}
+            <View style={styles.centerZone}>
+              {activeGroup ? (
+                <View style={[styles.heroCard, isDark && styles.heroCardDark]}>
+                  <View style={styles.heroTop}>
+                    <Animated.View style={[styles.heroDot, {
+                      backgroundColor: isDark ? C.red : C.green,
+                      opacity: isDark ? 1 : livePulse,
+                    }]} />
+                    <Text style={[styles.heroStatus, { color: isDark ? C.red : C.green }]}>
                       {isDark ? 'STEALTH ACTIVE' : 'BROADCASTING LIVE'}
                     </Text>
-                    <Text style={styles.stealthSub}>
-                      {isEnforced
-                        ? 'Tracking enforced by crew owner'
-                        : isDark
-                          ? 'Your location is hidden from crew'
-                          : 'Your location is visible to crew'}
-                    </Text>
                   </View>
-                </View>
-                <TouchableOpacity
-                  style={[styles.stealthBtn, isDark && styles.stealthBtnActive, (isEnforced || darkLoading) && { opacity: 0.45 }]}
-                  onPress={handleGoDark}
-                  disabled={isEnforced || darkLoading}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons
-                    name={isDark ? 'radio' : 'eye-off'}
-                    size={15}
-                    color={isDark ? '#000' : C.red}
-                  />
-                  <Text style={[styles.stealthBtnText, isDark && styles.stealthBtnTextActive]}>
-                    {darkLoading ? 'SYNCING...' : isEnforced ? 'TRACKING ENFORCED' : isDark ? 'GO LIVE' : 'GO DARK / STEALTH'}
+
+                  <Text style={styles.heroCrew} numberOfLines={1}>
+                    {activeGroup.name.toUpperCase()}
                   </Text>
-                </TouchableOpacity>
+                  <Text style={styles.heroDesc}>
+                    {isEnforced
+                      ? 'Tracking enforced by crew owner'
+                      : isDark
+                        ? 'Your location is hidden from the crew'
+                        : 'Your location is visible to the crew'}
+                  </Text>
 
-                {activeGroup?.invite_code && (
-                  <TouchableOpacity style={styles.inviteRow} onPress={handleShareInvite} activeOpacity={0.8}>
-                    <Text style={styles.inviteLabel}>INVITE CODE</Text>
-                    <Text style={styles.inviteCode}>{activeGroup.invite_code}</Text>
-                    <Ionicons name="share-social-outline" size={14} color="rgba(255,255,255,0.35)" />
+                  <TouchableOpacity
+                    style={[styles.goBtn, isDark && styles.goBtnActive, (isEnforced || darkLoading) && { opacity: 0.45 }]}
+                    onPress={handleGoDark}
+                    disabled={isEnforced || darkLoading}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons
+                      name={isDark ? 'radio' : 'eye-off'}
+                      size={17}
+                      color={isDark ? '#000' : C.red}
+                    />
+                    <Text style={[styles.goBtnText, { color: isDark ? '#000' : C.red }]}>
+                      {darkLoading ? 'SYNCING...' : isEnforced ? 'TRACKING ENFORCED' : isDark ? 'GO LIVE' : 'GO DARK / STEALTH'}
+                    </Text>
                   </TouchableOpacity>
-                )}
-              </View>
 
-              {/* ── QUICK ACTION GRID ── */}
+                  {!!activeGroup.invite_code && (
+                    <TouchableOpacity style={styles.inviteRow} onPress={handleShareInvite} activeOpacity={0.8}>
+                      <Text style={styles.inviteLabel}>INVITE CODE</Text>
+                      <Text style={styles.inviteCode}>{activeGroup.invite_code}</Text>
+                      <Ionicons name="share-social-outline" size={14} color="rgba(255,255,255,0.35)" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.emptyHero} onPress={openCrewSheet} activeOpacity={0.85}>
+                  <Ionicons name="radio-outline" size={34} color={C.green} />
+                  <Text style={styles.emptyHeroText}>INITIALIZE NEW CREW</Text>
+                  <Text style={styles.emptyHeroSub}>Create a crew to start broadcasting.</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* BOTTOM ZONE — quick actions */}
+            <View style={styles.bottomZone}>
               <Text style={styles.sectionHeader}>QUICK ACTIONS</Text>
               <View style={styles.actionGrid}>
-                {/* Place Marker */}
                 <TouchableOpacity
                   style={[styles.actionTile, !activeGroup && styles.actionTileDisabled]}
                   onPress={() => {
@@ -519,13 +541,10 @@ export const NavigationDrawer: React.FC = () => {
                   }}
                   activeOpacity={0.75}
                 >
-                  <View style={styles.actionIcon}>
-                    <Ionicons name="pin" size={22} color={C.green} />
-                  </View>
+                  <View style={styles.actionIcon}><Ionicons name="pin" size={22} color={C.green} /></View>
                   <Text style={styles.actionLabel}>MARK</Text>
                 </TouchableOpacity>
 
-                {/* Place Zone */}
                 <TouchableOpacity
                   style={[styles.actionTile, !activeGroup && styles.actionTileDisabled]}
                   onPress={() => {
@@ -534,43 +553,225 @@ export const NavigationDrawer: React.FC = () => {
                   }}
                   activeOpacity={0.75}
                 >
-                  <View style={styles.actionIcon}>
-                    <Ionicons name="scan" size={22} color={C.green} />
-                  </View>
-                  <Text style={styles.actionLabel}>ZONE</Text>
+                  <View style={styles.actionIcon}><Ionicons name="scan" size={22} color={C.green} /></View>
+                  <Text style={styles.actionLabel}>ZONES</Text>
                 </TouchableOpacity>
 
-                {/* Invite */}
                 <TouchableOpacity
                   style={[styles.actionTile, !activeGroup && styles.actionTileDisabled]}
                   onPress={handleShareInvite}
                   activeOpacity={0.75}
                   disabled={!activeGroup}
                 >
-                  <View style={styles.actionIcon}>
-                    <Ionicons name="share-social" size={22} color={C.green} />
-                  </View>
+                  <View style={styles.actionIcon}><Ionicons name="share-social" size={22} color={C.green} /></View>
                   <Text style={styles.actionLabel}>INVITE</Text>
                 </TouchableOpacity>
 
-                {/* Settings */}
                 <TouchableOpacity
                   style={styles.actionTile}
                   onPress={() => { sheetRef.current?.snapToIndex(0); router.push('/(tabs)/settings'); }}
                   activeOpacity={0.75}
                 >
-                  <View style={styles.actionIcon}>
-                    <Ionicons name="settings" size={22} color={C.green} />
-                  </View>
+                  <View style={styles.actionIcon}><Ionicons name="settings" size={22} color={C.green} /></View>
                   <Text style={styles.actionLabel}>SETTINGS</Text>
                 </TouchableOpacity>
               </View>
-
-              <View style={{ height: 48 }} />
-            </BottomSheetScrollView>
-          </>
-        )}
+            </View>
+          </BottomSheetScrollView>
+        </BottomSheetView>
       </BottomSheet>
+
+      {/* ── CREATE CREW SHEET ── */}
+      <Modal visible={crewModal} transparent animationType="slide" onRequestClose={() => setCrewModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={mod.backdrop}>
+          <BlurView intensity={95} tint="dark" style={mod.sheet}>
+            <View style={mod.handle}><View style={mod.handleBar} /></View>
+            <Text style={[mod.title, { color: C.green }]}>INITIALIZE NEW CREW</Text>
+            <Text style={mod.sub}>Create a permanent intel group.</Text>
+
+            <Text style={mod.label}>CREW NAME</Text>
+            <TextInput
+              style={mod.input}
+              placeholder="e.g. Ridge Hunters"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={crewName}
+              onChangeText={setCrewName}
+              autoCapitalize="words"
+              returnKeyType="done"
+            />
+
+            <Text style={mod.label}>TRACKING PERMISSIONS</Text>
+            <View style={mod.policyRow}>
+              <TouchableOpacity
+                style={[mod.policyBtn, !enforce && mod.policyBtnActive]}
+                onPress={() => setEnforce(false)}
+                activeOpacity={0.85}
+              >
+                <Text style={[mod.policyText, !enforce && { color: C.green }]}>FLEXIBLE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[mod.policyBtn, enforce && mod.policyBtnActiveRed]}
+                onPress={() => setEnforce(true)}
+                activeOpacity={0.85}
+              >
+                <Text style={[mod.policyText, enforce && { color: C.red }]}>ENFORCED</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[mod.primaryBtn, creatingCrew && { opacity: 0.6 }]}
+              onPress={handleCreateCrew}
+              disabled={creatingCrew}
+              activeOpacity={0.85}
+            >
+              <Text style={mod.primaryText}>{creatingCrew ? 'CREATING CREW...' : 'GENERATE ENCRYPTED INVITE'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={mod.cancelBtn} onPress={() => setCrewModal(false)} activeOpacity={0.8}>
+              <Text style={mod.cancelText}>CLOSE</Text>
+            </TouchableOpacity>
+          </BlurView>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── NEW JOURNEY SHEET ── */}
+      <Modal visible={journeyModal} transparent animationType="slide" onRequestClose={() => setJourneyModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={mod.backdrop}>
+          <BlurView intensity={95} tint="dark" style={[mod.sheet, { maxHeight: SCREEN_H * 0.82 }]}>
+            <View style={mod.handle}><View style={mod.handleBar} /></View>
+            <Text style={[mod.title, { color: C.blue }]}>NEW JOURNEY SESSION</Text>
+            <Text style={mod.sub}>Share a live session to a destination.</Text>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={mod.label}>JOURNEY NAME</Text>
+              <TextInput
+                style={mod.input}
+                placeholder="e.g. Drive home"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={journeyName}
+                onChangeText={setJourneyName}
+                returnKeyType="next"
+              />
+
+              <Text style={mod.label}>DESTINATION (OPTIONAL)</Text>
+              <View style={mod.placesWrap}>
+                <GooglePlacesAutocomplete
+                  ref={journeyPlacesRef}
+                  placeholder="Search address or place"
+                  fetchDetails
+                  minLength={1}
+                  debounce={250}
+                  enablePoweredByContainer={false}
+                  keepResultsAfterBlur
+                  keyboardShouldPersistTaps="handled"
+                  onFail={(e) => console.log('JOURNEY PLACES FAIL:', e)}
+                  textInputProps={{
+                    placeholderTextColor: 'rgba(255,255,255,0.3)',
+                    returnKeyType: 'search',
+                    clearButtonMode: 'always',
+                  }}
+                  onPress={(data: any, details: any = null) => {
+                    const loc = details?.geometry?.location;
+                    setJourneyDest(data?.description || details?.formatted_address || '');
+                    setJourneyDestCoords(loc ? { lat: loc.lat, lng: loc.lng } : null);
+                    Keyboard.dismiss();
+                  }}
+                  query={{ key: GOOGLE_API_KEY, language: 'en' }}
+                  styles={{
+                    container: mod.placesContainer,
+                    textInputContainer: mod.placesInputContainer,
+                    textInput: mod.input,
+                    listView: mod.placesList,
+                    row: mod.placesRow,
+                    description: { color: '#FFFFFF', fontSize: 13 },
+                    separator: { backgroundColor: '#222', height: 0.5 },
+                  }}
+                />
+              </View>
+
+              {!!journeyDest && (
+                <View style={mod.destPreview}>
+                  <Ionicons name="location" size={16} color={C.blue} />
+                  <Text style={mod.destPreviewText} numberOfLines={2}>{journeyDest}</Text>
+                </View>
+              )}
+
+              <Text style={mod.label}>EMERGENCY CONTACTS</Text>
+              <TouchableOpacity style={mod.contactBtn} onPress={syncContacts} activeOpacity={0.85}>
+                <Ionicons name="person-add" size={18} color={C.blue} />
+                <Text style={mod.contactBtnText}>
+                  {contactList.length > 0 ? `${contactList.length} CONTACTS SELECTED` : 'ADD EMERGENCY CONTACTS'}
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[mod.primaryBtn, { backgroundColor: C.blue }, creatingJourney && { opacity: 0.6 }]}
+              onPress={handleCreateJourney}
+              disabled={creatingJourney}
+              activeOpacity={0.85}
+            >
+              <Text style={mod.primaryText}>{creatingJourney ? 'STARTING...' : 'START JOURNEY SESSION'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={mod.cancelBtn} onPress={() => setJourneyModal(false)} activeOpacity={0.8}>
+              <Text style={mod.cancelText}>ABORT</Text>
+            </TouchableOpacity>
+          </BlurView>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── CONTACT PICKER MODAL ── */}
+      <Modal visible={showContactPicker} animationType="slide" onRequestClose={() => setShowContactPicker(false)}>
+        <SafeAreaView style={cm.root}>
+          <View style={cm.header}>
+            <Text style={[mod.title, { color: C.blue, marginBottom: 0 }]}>SELECT CONTACTS</Text>
+            <TouchableOpacity onPress={() => setShowContactPicker(false)}>
+              <Ionicons name="close-circle" size={30} color={C.red} />
+            </TouchableOpacity>
+          </View>
+
+          <TextInput
+            style={cm.search}
+            placeholder="Search contacts"
+            placeholderTextColor="rgba(255,255,255,0.3)"
+            value={contactSearch}
+            onChangeText={setContactSearch}
+            autoCapitalize="none"
+          />
+
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flex: 1 }}>
+            {allContacts
+              .filter((c) => !contactSearch.trim() || (c.name ?? '').toLowerCase().includes(contactSearch.trim().toLowerCase()))
+              .map((c) => {
+                const key = contactKey(c);
+                const selected = contactList.some((x) => contactKey(x) === key);
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    style={[cm.row, selected && cm.rowActive]}
+                    onPress={() => toggleContact(c)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={[cm.avatar, { backgroundColor: selected ? C.blue : 'rgba(255,255,255,0.1)' }]}>
+                      <Text style={cm.avatarText}>{(c.name?.[0] ?? '?').toUpperCase()}</Text>
+                    </View>
+                    <Text style={cm.name} numberOfLines={1}>{c.name ?? 'Unknown'}</Text>
+                    {selected && <Ionicons name="checkmark-circle" size={20} color={C.blue} />}
+                  </TouchableOpacity>
+                );
+              })}
+          </ScrollView>
+
+          <TouchableOpacity
+            style={[mod.primaryBtn, { backgroundColor: C.blue, marginTop: 12 }]}
+            onPress={() => setShowContactPicker(false)}
+            activeOpacity={0.85}
+          >
+            <Text style={mod.primaryText}>
+              {contactList.length > 0 ? `CONFIRM ${contactList.length} CONTACTS` : 'DONE'}
+            </Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      </Modal>
 
       {/* ── MARKER PICKER MODAL ── */}
       <Modal visible={markerModal} transparent animationType="slide" onRequestClose={() => setMarkerModal(false)}>
@@ -613,7 +814,6 @@ export const NavigationDrawer: React.FC = () => {
             <Text style={[mod.title, { color: C.green }]}>CREATE ZONE</Text>
             <Text style={mod.sub}>Choose the zone shape.</Text>
             <View style={mod.zoneRow}>
-              {/* Circle */}
               <TouchableOpacity style={mod.zoneTile} onPress={() => handleSelectZoneType('circle')} activeOpacity={0.8}>
                 <View style={[mod.tileIcon, { borderColor: C.greenBorder, backgroundColor: C.greenDim }]}>
                   <Ionicons name="radio-button-on" size={26} color={C.green} />
@@ -621,7 +821,6 @@ export const NavigationDrawer: React.FC = () => {
                 <Text style={mod.tileLabel}>CIRCLE</Text>
                 <Text style={mod.zoneSub}>Tap to set center</Text>
               </TouchableOpacity>
-              {/* Polygon */}
               <TouchableOpacity style={mod.zoneTile} onPress={() => handleSelectZoneType('polygon')} activeOpacity={0.8}>
                 <View style={[mod.tileIcon, { borderColor: C.greenBorder, backgroundColor: C.greenDim }]}>
                   <Ionicons name="git-network" size={26} color={C.green} />
@@ -643,21 +842,25 @@ export const NavigationDrawer: React.FC = () => {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   glass: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.15)',
   },
+  backdrop: { backgroundColor: 'rgba(0,0,0,0.25)' },
   handle: { height: 26, alignItems: 'center', justifyContent: 'center' },
-  handleBar: { width: 38, height: 4, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
+  handleBar: { width: 40, height: 4, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.4)' },
+
+  container: { flex: 1 },
 
   // Collapsed peek
   peek: {
+    height: 80,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 14,
     gap: 12,
   },
   peekLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -673,73 +876,59 @@ const styles = StyleSheet.create({
   peekToggleDark: { borderColor: C.redBorder, backgroundColor: C.redDim },
   peekToggleText: { fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
 
-  // Tab bar
-  tabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: 20,
+  // Expanded body — 3 zones, generous vertical rhythm.
+  // flexGrow lets the center zone fill on tall screens (bottom stays pinned),
+  // while the ScrollView still scrolls if a short screen can't fit everything.
+  bodyScroll: { flex: 1 },
+  body: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 22 },
+
+  // TOP — create buttons (styled like GO DARK / GO LIVE)
+  createRow: { flexDirection: 'row', gap: 14, marginTop: 4 },
+  createBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 16, borderRadius: 16, borderWidth: 1.5,
   },
-  tabItem: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabItemActive: { borderBottomColor: C.green },
-  tabText: { color: 'rgba(255,255,255,0.35)', fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
-  tabTextActive: { color: C.green },
+  createBtnCrew:    { borderColor: C.greenBorder, backgroundColor: C.greenDim },
+  createBtnJourney: { borderColor: C.blueBorder,  backgroundColor: C.blueDim },
+  createBtnText: { fontSize: 12, fontWeight: '900', letterSpacing: 1 },
 
-  scroll: { paddingBottom: 20 },
-
-  // Empty state
-  empty: { alignItems: 'center', paddingVertical: 40, gap: 10 },
-  emptyTitle: { color: 'rgba(255,255,255,0.35)', fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
-  emptySub:   { color: 'rgba(255,255,255,0.25)', fontSize: 12, fontWeight: '500', textAlign: 'center', paddingHorizontal: 32 },
-
-  // Group rows
-  groupRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)',
+  // CENTER — hero (the focal point), floats with equal air above and below
+  centerZone: { flex: 1, justifyContent: 'center', paddingVertical: 22 },
+  heroCard: {
+    backgroundColor: C.greenDim, borderRadius: 24, borderWidth: 1.5,
+    borderColor: C.greenBorder, paddingVertical: 24, paddingHorizontal: 22, gap: 4,
   },
-  groupRowActive: { backgroundColor: C.greenDim },
-  groupRowLeft:   { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
-  groupActiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.green },
-  groupName:      { color: 'rgba(255,255,255,0.6)', fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
-  groupNameActive:{ color: C.textPrimary },
-  groupMeta:      { color: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: '700', letterSpacing: 1, marginTop: 2 },
-  groupActiveBadge: { backgroundColor: C.greenDim, borderWidth: 1, borderColor: C.greenBorder, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  groupActiveBadgeText: { color: C.green, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
-
-  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.07)', marginVertical: 20, marginHorizontal: 20 },
-
-  // Stealth card
-  stealthCard: {
-    marginHorizontal: 16, borderRadius: 20, borderWidth: 1,
-    borderColor: C.greenBorder, backgroundColor: C.greenDim,
-    padding: 16, gap: 12,
-  },
-  stealthCardDark: { borderColor: C.redBorder, backgroundColor: C.redDim },
-  stealthTop:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  stealthDot:   { width: 9, height: 9, borderRadius: 5 },
-  stealthStatus:{ fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
-  stealthSub:   { color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: '600', marginTop: 2 },
-  stealthBtn: {
+  heroCardDark: { borderColor: C.redBorder, backgroundColor: C.redDim },
+  heroTop: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  heroDot: { width: 9, height: 9, borderRadius: 5 },
+  heroStatus: { fontSize: 11, fontWeight: '900', letterSpacing: 1.4 },
+  heroCrew: { color: C.textPrimary, fontSize: 24, fontWeight: '900', letterSpacing: 0.5 },
+  heroDesc: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '600', marginTop: 2, marginBottom: 16, lineHeight: 18 },
+  goBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    borderWidth: 1, borderColor: C.redBorder, backgroundColor: C.redDim,
-    borderRadius: 14, paddingVertical: 13,
+    borderWidth: 1.5, borderColor: C.redBorder, backgroundColor: C.redDim,
+    borderRadius: 16, paddingVertical: 17,
   },
-  stealthBtnActive: { backgroundColor: C.green, borderColor: C.green },
-  stealthBtnText:   { color: C.red, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
-  stealthBtnTextActive: { color: '#000' },
+  goBtnActive: { backgroundColor: C.green, borderColor: C.green },
+  goBtnText: { fontSize: 13, fontWeight: '900', letterSpacing: 1.2 },
 
-  // Invite row
-  inviteRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
+  inviteRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
   inviteLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 9, fontWeight: '900', letterSpacing: 1.2 },
-  inviteCode:  { flex: 1, color: C.green, fontSize: 14, fontWeight: '900', letterSpacing: 2 },
+  inviteCode:  { flex: 1, color: C.green, fontSize: 15, fontWeight: '900', letterSpacing: 2 },
 
-  // Section header
-  sectionHeader: { color: 'rgba(255,255,255,0.35)', fontSize: 9, fontWeight: '900', letterSpacing: 1.6, marginTop: 24, marginBottom: 14, marginHorizontal: 20 },
+  emptyHero: {
+    alignItems: 'center', gap: 8, paddingVertical: 36, paddingHorizontal: 20,
+    borderRadius: 22, borderWidth: 1.5, borderStyle: 'dashed', borderColor: C.greenBorder,
+    backgroundColor: C.greenDim,
+  },
+  emptyHeroText: { color: C.green, fontSize: 13, fontWeight: '900', letterSpacing: 1.2, marginTop: 4 },
+  emptyHeroSub:  { color: 'rgba(255,255,255,0.45)', fontSize: 12, fontWeight: '600' },
 
-  // Quick action grid
-  actionGrid: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 16 },
-  actionTile: { alignItems: 'center', gap: 6 },
+  // BOTTOM — quick actions
+  bottomZone: { paddingTop: 4 },
+  sectionHeader: { color: 'rgba(255,255,255,0.35)', fontSize: 9, fontWeight: '900', letterSpacing: 1.6, marginBottom: 16, marginLeft: 2 },
+  actionGrid: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 6 },
+  actionTile: { alignItems: 'center', gap: 7 },
   actionTileDisabled: { opacity: 0.4 },
   actionIcon: {
     width: 56, height: 56, borderRadius: 28,
@@ -759,6 +948,51 @@ const mod = StyleSheet.create({
   handleBar:{ width: 40, height: 4, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
   title:    { fontSize: 16, fontWeight: '900', letterSpacing: 1.5, marginBottom: 6 },
   sub:      { color: 'rgba(255,255,255,0.45)', fontSize: 12, fontWeight: '600', marginBottom: 20 },
+
+  label:    { color: '#FFFFFF', fontSize: 10, fontWeight: '900', letterSpacing: 1.2, marginBottom: 8, marginTop: 14 },
+  input: {
+    backgroundColor: 'rgba(0,0,0,0.3)', color: '#FFFFFF', padding: 16, borderRadius: 12,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.18)', fontSize: 14, fontWeight: '600',
+  },
+
+  // Google Places autocomplete
+  placesWrap: { minHeight: 56, zIndex: 9000 },
+  placesContainer: { flex: 0, zIndex: 9001 },
+  placesInputContainer: { zIndex: 9002 },
+  placesList: {
+    backgroundColor: '#111', borderRadius: 12, borderWidth: 1, borderColor: '#333',
+    marginTop: 8, maxHeight: 200, overflow: 'hidden', zIndex: 9003,
+  },
+  placesRow: { backgroundColor: '#111', padding: 13, height: 50 },
+  destPreview: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10,
+    backgroundColor: C.blueDim, borderWidth: 1, borderColor: C.blueBorder,
+    borderRadius: 12, padding: 12,
+  },
+  destPreviewText: { flex: 1, color: '#FFFFFF', fontSize: 12, fontWeight: '800', lineHeight: 17 },
+
+  // Emergency contacts button
+  contactBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16, borderRadius: 12,
+    backgroundColor: C.blueDim, borderWidth: 1.5, borderColor: C.blueBorder,
+  },
+  contactBtnText: { color: C.blue, fontWeight: '900', fontSize: 12, letterSpacing: 0.8 },
+
+  policyRow: { flexDirection: 'row', gap: 10 },
+  policyBtn: { flex: 1, paddingVertical: 13, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', alignItems: 'center' },
+  policyBtnActive: { borderColor: C.greenBorder, backgroundColor: C.greenDim },
+  policyBtnActiveRed: { borderColor: C.redBorder, backgroundColor: C.redDim },
+  policyText: { color: 'rgba(255,255,255,0.7)', fontWeight: '900', fontSize: 11, letterSpacing: 0.8 },
+
+  watcherRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'transparent' },
+  watcherRowActive: { backgroundColor: C.blueDim, borderColor: C.blueBorder },
+  watcherAvatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
+  watcherInitials: { color: '#FFFFFF', fontSize: 11, fontWeight: '900' },
+  watcherName: { flex: 1, color: '#FFFFFF', fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+
+  primaryBtn: { backgroundColor: C.green, paddingVertical: 18, borderRadius: 16, alignItems: 'center', marginTop: 22 },
+  primaryText: { color: '#000000', fontWeight: '900', fontSize: 13, letterSpacing: 1.2 },
+
   grid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   zoneRow:  { flexDirection: 'row', gap: 12 },
   tile:     { width: '30.5%', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', padding: 12, gap: 6 },
@@ -766,6 +1000,25 @@ const mod = StyleSheet.create({
   tileIcon: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   tileLabel:{ color: C.textPrimary, fontSize: 10, fontWeight: '900', letterSpacing: 0.8, textAlign: 'center' },
   zoneSub:  { color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: '600', textAlign: 'center' },
-  cancelBtn:{ marginTop: 20, alignItems: 'center', paddingVertical: 14 },
+  cancelBtn:{ marginTop: 16, alignItems: 'center', paddingVertical: 14 },
   cancelText:{ color: C.red, fontSize: 12, fontWeight: '900', letterSpacing: 1 },
+});
+
+// ─── Contact picker styles ──────────────────────────────────────────────────
+const cm = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#0a0a0a', paddingHorizontal: 20 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16 },
+  search: {
+    backgroundColor: 'rgba(255,255,255,0.06)', color: '#FFFFFF', padding: 14, borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', fontSize: 14, fontWeight: '600', marginBottom: 12,
+  },
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 12,
+    borderRadius: 12, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1, borderColor: 'transparent',
+  },
+  rowActive: { backgroundColor: C.blueDim, borderColor: C.blueBorder },
+  avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+  name: { flex: 1, color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
 });

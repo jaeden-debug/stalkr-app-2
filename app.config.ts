@@ -33,6 +33,8 @@ export default ({ config }: ConfigContext): any => ({
         'Stalkr needs your location in the background to continue sharing with your crew and alert you when you enter or leave safety zones — even when the app is minimized.',
       NSLocationAlwaysUsageDescription:
         'Stalkr uses background location to keep your crew aware of your position and send zone alerts while you are in the field.',
+      NSContactsUsageDescription:
+        'Stalkr uses your contacts so you can quickly add emergency contacts to follow your live journey.',
       UIBackgroundModes: ['location', 'fetch', 'remote-notification'],
     },
     // Universal Links — iOS opens the app from https://stalkr.app/invite/*
@@ -55,6 +57,7 @@ export default ({ config }: ConfigContext): any => ({
       'RECEIVE_BOOT_COMPLETED',
       'VIBRATE',
       'POST_NOTIFICATIONS',
+      'READ_CONTACTS',
     ],
     config: {
       googleMaps: {
@@ -99,6 +102,13 @@ export default ({ config }: ConfigContext): any => ({
     'expo-font',
     'expo-location',
     'expo-notifications',
+    [
+      'expo-contacts',
+      {
+        contactsPermission:
+          'Stalkr uses your contacts so you can quickly add emergency contacts to follow your live journey.',
+      },
+    ],
     [
       'expo-image-picker',
       {
