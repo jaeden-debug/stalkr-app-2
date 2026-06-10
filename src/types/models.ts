@@ -48,6 +48,12 @@ export interface Profile {
   is_online: boolean;
   last_seen_at: string | null;
   push_token: string | null;
+  // Emergency medical profile
+  blood_type: string | null;
+  allergies: string | null;
+  medications: string | null;
+  medical_notes: string | null;
+  medical_share_with_crew: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -344,6 +350,12 @@ export interface CheckInTimer {
   resolved_at: string | null;
   notify_user_ids: string[];
   created_at: string;
+  mode?: 'checkin' | 'deadman';
+  interval_minutes?: number | null;
+  reminder_sent?: boolean;
+  escalated?: boolean;
+  escalated_at?: string | null;
+  acknowledged_at?: string | null;
   // Enriched
   minutesRemaining?: number;
   isOverdue?: boolean;

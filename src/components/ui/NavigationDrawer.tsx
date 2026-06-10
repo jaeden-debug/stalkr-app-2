@@ -50,6 +50,8 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useLocationStore } from '@/store/useLocationStore';
 import { useMapStore } from '@/store/useMapStore';
 import { useSessionStore } from '@/store/useSessionStore';
+import { useSafetyStore } from '@/store/useSafetyStore';
+import { useNotifCenterStore } from '@/store/useNotifCenterStore';
 import { useGoDark } from '@/hooks/useGoDark';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { getLocationStatus } from '@/utils/time';
@@ -153,7 +155,11 @@ export const NavigationDrawer: React.FC = () => {
   const [idx, setIdx]               = useState(0);
   const [markerModal, setMarkerModal] = useState(false);
   const [zoneModal, setZoneModal]     = useState(false);
-  const [crewModal, setCrewModal]     = useState(false);
+  const [crewModal, setCrewModal]     = useState(false);   // create-crew form
+  const [crewsModal, setCrewsModal]   = useState(false);   // crew switcher list
+  const [joinCrewModal, setJoinCrewModal] = useState(false);
+  const [joinCode, setJoinCode]       = useState('');
+  const [joiningCrew, setJoiningCrew] = useState(false);
   const [journeyModal, setJourneyModal] = useState(false);
 
   // ── Stores ──────────────────────────────────────────────────────────────────
@@ -163,6 +169,7 @@ export const NavigationDrawer: React.FC = () => {
   const groupMembers     = useGroupStore((s) => s.groupMembers);
   const setActiveGroupId = useGroupStore((s) => s.setActiveGroupId);
   const createGroup      = useGroupStore((s) => s.createGroup);
+  const joinByInviteCode = useGroupStore((s) => s.joinByInviteCode);
   const loadGroupMembers = useGroupStore((s) => s.loadGroupMembers);
   const activeGroup = useMemo(() => groups.find((g) => g.id === activeGroupId) ?? null, [groups, activeGroupId]);
 
@@ -186,6 +193,8 @@ export const NavigationDrawer: React.FC = () => {
   );
 
   const livePulse = usePulse(isBroadcasting && !isDark);
+  const statusPulse = usePulse(true); // peek LIVE/DARK indicator always flashes
+  const unseenCount = useNotifCenterStore((s) => s.unseenCount);
 
   // ── Create-crew form state ───────────────────────────────────────────────────
   const [crewName, setCrewName]   = useState('');
@@ -245,10 +254,61 @@ export const NavigationDrawer: React.FC = () => {
     else useMapStore.getState().startPolygonZonePlacement();
   }, []);
 
+  // ── Search bar → open the maps-style place search overlay ────────────────────
+  const onSearchPress = useCallback(() => {
+    sheetRef.current?.snapToIndex(0);
+    useMapStore.getState().setSearchOpen(true);
+  }, []);
+
+  // ── CREWS hub ────────────────────────────────────────────────────────────────
+  const openCrewsList = useCallback(() => setCrewsModal(true), []);
+
+  const openJourneys = useCallback(() => {
+    sheetRef.current?.snapToIndex(0);
+    setCrewsModal(false);
+    router.push('/(tabs)/sessions');
+  }, [router]);
+
+  const handleSwitchCrew = useCallback((id: string) => {
+    Haptics.selectionAsync();
+    setActiveGroupId(id);
+    setCrewsModal(false);
+    sheetRef.current?.snapToIndex(0);
+  }, [setActiveGroupId]);
+
+  const handleManageCrew = useCallback((id: string) => {
+    setActiveGroupId(id);
+    setCrewsModal(false);
+    sheetRef.current?.snapToIndex(0);
+    router.push(`/groups/${id}`);
+  }, [router, setActiveGroupId]);
+
+  const handleJoinCrew = useCallback(async () => {
+    const code = joinCode.trim().toUpperCase();
+    if (!code) { Alert.alert('CODE REQUIRED', 'Enter an invite code.'); return; }
+    setJoiningCrew(true);
+    try {
+      const group = await joinByInviteCode(code);
+      if (!group) { Alert.alert('INVALID CODE', 'That invite code is invalid or expired.'); return; }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      track({ name: 'group_joined', properties: { method: 'invite_code' } });
+      setJoinCrewModal(false);
+      setJoinCode('');
+      setCrewsModal(false);
+      sheetRef.current?.snapToIndex(0);
+      Alert.alert('CREW JOINED', `You joined ${group.name}.`);
+    } catch (e: any) {
+      Alert.alert('JOIN ERROR', e?.message ?? 'Unable to join crew.');
+    } finally {
+      setJoiningCrew(false);
+    }
+  }, [joinCode, joinByInviteCode, track]);
+
   // ── NEW CREW ─────────────────────────────────────────────────────────────────
   const openCrewSheet = useCallback(() => {
     setCrewName('');
     setEnforce(false);
+    setCrewsModal(false);
     setCrewModal(true);
   }, []);
 
@@ -411,24 +471,29 @@ export const NavigationDrawer: React.FC = () => {
       >
         {/* Content is ALWAYS mounted → expands instantly, no render wait */}
         <BottomSheetView style={styles.container}>
-          {/* ── Collapsed peek (always visible) ── */}
-          <TouchableOpacity
-            style={styles.peek}
-            activeOpacity={0.9}
-            onPress={() => sheetRef.current?.snapToIndex(idx === 0 ? 1 : 0)}
-          >
-            <View style={styles.peekLeft}>
-              <Animated.View style={[styles.peekDot, {
-                backgroundColor: isDark ? C.red : C.green,
-                opacity: isDark ? 1 : livePulse,
-              }]} />
-              <View>
-                <Text style={styles.peekCrew} numberOfLines={1}>
-                  {activeGroup?.name?.toUpperCase() ?? 'NO ACTIVE CREW'}
-                </Text>
-                {liveCount > 0 && <Text style={styles.peekSub}>{liveCount} LIVE</Text>}
-              </View>
-            </View>
+          {/* ── Collapsed peek: search bar + flashing LIVE/DARK ── */}
+          <View style={styles.peek}>
+            <TouchableOpacity
+              style={styles.searchBar}
+              onPress={onSearchPress}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="search" size={16} color="rgba(255,255,255,0.5)" />
+              <Text style={styles.searchPlaceholder} numberOfLines={1}>Search places & addresses</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.bellBtn}
+              onPress={() => { sheetRef.current?.snapToIndex(0); router.push('/notifications'); }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="notifications" size={18} color="rgba(255,255,255,0.8)" />
+              {unseenCount > 0 && (
+                <View style={styles.bellBadge}>
+                  <Text style={styles.bellBadgeText}>{unseenCount > 9 ? '9+' : unseenCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.peekToggle, isDark && styles.peekToggleDark]}
@@ -436,12 +501,15 @@ export const NavigationDrawer: React.FC = () => {
               disabled={isEnforced || darkLoading}
               activeOpacity={0.8}
             >
-              <Ionicons name={isDark ? 'eye-off' : 'radio'} size={13} color={isDark ? C.red : C.green} />
+              <Animated.View style={[styles.peekToggleDot, {
+                backgroundColor: isDark ? C.red : C.green,
+                opacity: statusPulse,
+              }]} />
               <Text style={[styles.peekToggleText, { color: isDark ? C.red : C.green }]}>
                 {darkLoading ? '...' : isDark ? 'DARK' : 'LIVE'}
               </Text>
             </TouchableOpacity>
-          </TouchableOpacity>
+          </View>
 
           {/* ── Expanded body: 3 zones (scrolls only if a short screen needs it) ── */}
           <BottomSheetScrollView
@@ -450,24 +518,24 @@ export const NavigationDrawer: React.FC = () => {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* TOP ZONE — create buttons (same style as GO DARK / GO LIVE) */}
+            {/* TOP ZONE — Crews / Journeys hubs */}
             <View style={styles.createRow}>
               <TouchableOpacity
                 style={[styles.createBtn, styles.createBtnCrew]}
-                onPress={openCrewSheet}
+                onPress={openCrewsList}
                 activeOpacity={0.85}
               >
                 <Ionicons name="people" size={18} color={C.green} />
-                <Text style={[styles.createBtnText, { color: C.green }]}>NEW CREW</Text>
+                <Text style={[styles.createBtnText, { color: C.green }]}>CREWS</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[styles.createBtn, styles.createBtnJourney]}
-                onPress={openJourneySheet}
+                onPress={openJourneys}
                 activeOpacity={0.85}
               >
                 <Ionicons name="navigate" size={18} color={C.blue} />
-                <Text style={[styles.createBtnText, { color: C.blue }]}>NEW JOURNEY</Text>
+                <Text style={[styles.createBtnText, { color: C.blue }]}>JOURNEYS</Text>
               </TouchableOpacity>
             </View>
 
@@ -533,6 +601,15 @@ export const NavigationDrawer: React.FC = () => {
             <View style={styles.bottomZone}>
               <Text style={styles.sectionHeader}>QUICK ACTIONS</Text>
               <View style={styles.actionGrid}>
+                <TouchableOpacity
+                  style={styles.actionTile}
+                  onPress={() => { sheetRef.current?.snapToIndex(0); useSafetyStore.getState().setCenterOpen(true); }}
+                  activeOpacity={0.75}
+                >
+                  <View style={[styles.actionIcon, { borderColor: C.redBorder, backgroundColor: C.redDim }]}><Ionicons name="shield-half" size={22} color={C.red} /></View>
+                  <Text style={styles.actionLabel}>SAFETY</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   style={[styles.actionTile, !activeGroup && styles.actionTileDisabled]}
                   onPress={() => {
@@ -628,6 +705,96 @@ export const NavigationDrawer: React.FC = () => {
             </TouchableOpacity>
             <TouchableOpacity style={mod.cancelBtn} onPress={() => setCrewModal(false)} activeOpacity={0.8}>
               <Text style={mod.cancelText}>CLOSE</Text>
+            </TouchableOpacity>
+          </BlurView>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── CREWS SWITCHER SHEET ── */}
+      <Modal visible={crewsModal} transparent animationType="slide" onRequestClose={() => setCrewsModal(false)}>
+        <View style={mod.backdrop}>
+          <BlurView intensity={95} tint="dark" style={[mod.sheet, { maxHeight: SCREEN_H * 0.8 }]}>
+            <View style={mod.handle}><View style={mod.handleBar} /></View>
+            <Text style={[mod.title, { color: C.green }]}>YOUR CREWS</Text>
+            <Text style={mod.sub}>Switch between crews or start a new one.</Text>
+
+            <View style={cs.actionRow}>
+              <TouchableOpacity style={cs.actionBtn} onPress={openCrewSheet} activeOpacity={0.85}>
+                <Ionicons name="add-circle" size={18} color={C.green} />
+                <Text style={[cs.actionText, { color: C.green }]}>NEW CREW</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={cs.actionBtnAlt}
+                onPress={() => { setJoinCode(''); setJoinCrewModal(true); }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="key" size={18} color={C.blue} />
+                <Text style={[cs.actionText, { color: C.blue }]}>JOIN CODE</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ marginTop: 8 }} showsVerticalScrollIndicator={false}>
+              {groups.length === 0 ? (
+                <Text style={cs.emptyText}>No crews yet. Create one or join with a code.</Text>
+              ) : (
+                groups.map((g) => {
+                  const isActive = g.id === activeGroupId;
+                  return (
+                    <View key={g.id} style={[cs.row, isActive && cs.rowActive]}>
+                      <TouchableOpacity style={cs.rowMain} onPress={() => handleSwitchCrew(g.id)} activeOpacity={0.8}>
+                        <View style={[cs.dot, { backgroundColor: isActive ? C.green : 'rgba(255,255,255,0.25)' }]} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={cs.name} numberOfLines={1}>{g.name.toUpperCase()}</Text>
+                          <Text style={cs.meta}>
+                            {isActive ? 'ACTIVE' : 'TAP TO ACTIVATE'}
+                            {g.member_role === 'owner' ? '  ·  OWNER' : ''}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={cs.manageBtn} onPress={() => handleManageCrew(g.id)} activeOpacity={0.8}>
+                        <Ionicons name="settings-outline" size={18} color="rgba(255,255,255,0.6)" />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+
+            <TouchableOpacity style={mod.cancelBtn} onPress={() => setCrewsModal(false)} activeOpacity={0.8}>
+              <Text style={mod.cancelText}>CLOSE</Text>
+            </TouchableOpacity>
+          </BlurView>
+        </View>
+      </Modal>
+
+      {/* ── JOIN CREW SHEET ── */}
+      <Modal visible={joinCrewModal} transparent animationType="slide" onRequestClose={() => setJoinCrewModal(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={mod.backdrop}>
+          <BlurView intensity={95} tint="dark" style={mod.sheet}>
+            <View style={mod.handle}><View style={mod.handleBar} /></View>
+            <Text style={[mod.title, { color: C.blue }]}>JOIN A CREW</Text>
+            <Text style={mod.sub}>Enter the invite code shared with you.</Text>
+            <TextInput
+              style={[mod.input, { letterSpacing: 4, textAlign: 'center', fontSize: 20 }]}
+              placeholder="ABCD1234"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              value={joinCode}
+              onChangeText={(t) => setJoinCode(t.toUpperCase())}
+              autoCapitalize="characters"
+              maxLength={12}
+              returnKeyType="done"
+              onSubmitEditing={handleJoinCrew}
+            />
+            <TouchableOpacity
+              style={[mod.primaryBtn, { backgroundColor: C.blue }, joiningCrew && { opacity: 0.6 }]}
+              onPress={handleJoinCrew}
+              disabled={joiningCrew}
+              activeOpacity={0.85}
+            >
+              <Text style={mod.primaryText}>{joiningCrew ? 'JOINING...' : 'JOIN CREW'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={mod.cancelBtn} onPress={() => setJoinCrewModal(false)} activeOpacity={0.8}>
+              <Text style={mod.cancelText}>CANCEL</Text>
             </TouchableOpacity>
           </BlurView>
         </KeyboardAvoidingView>
@@ -860,21 +1027,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     gap: 12,
   },
-  peekLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  peekDot:  { width: 9, height: 9, borderRadius: 5 },
-  peekCrew: { color: C.textPrimary, fontSize: 17, fontWeight: '900', letterSpacing: 0.3 },
-  peekSub:  { color: C.green, fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginTop: 1 },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    height: 44,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  searchPlaceholder: { flex: 1, color: 'rgba(255,255,255,0.5)', fontSize: 13, fontWeight: '600' },
+  bellBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  bellBadge: { position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3, backgroundColor: C.red, alignItems: 'center', justifyContent: 'center' },
+  bellBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '900' },
   peekToggle: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 7,
     borderWidth: 1, borderColor: C.greenBorder,
     backgroundColor: C.greenDim, borderRadius: 999,
-    paddingHorizontal: 12, paddingVertical: 8,
+    paddingHorizontal: 14, height: 44,
   },
   peekToggleDark: { borderColor: C.redBorder, backgroundColor: C.redDim },
-  peekToggleText: { fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
+  peekToggleDot: { width: 8, height: 8, borderRadius: 4 },
+  peekToggleText: { fontSize: 11, fontWeight: '900', letterSpacing: 1.2 },
 
   // Expanded body — 3 zones, generous vertical rhythm.
   // flexGrow lets the center zone fill on tall screens (bottom stays pinned),
@@ -1021,4 +1201,39 @@ const cm = StyleSheet.create({
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
   name: { flex: 1, color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+});
+
+// ─── Crews switcher styles ──────────────────────────────────────────────────
+const cs = StyleSheet.create({
+  actionRow: { flexDirection: 'row', gap: 10, marginBottom: 4 },
+  actionBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 13, borderRadius: 14, borderWidth: 1.5,
+    borderColor: C.greenBorder, backgroundColor: C.greenDim,
+  },
+  actionBtnAlt: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 13, borderRadius: 14, borderWidth: 1.5,
+    borderColor: C.blueBorder, backgroundColor: C.blueDim,
+  },
+  actionText: { fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  emptyText: {
+    color: 'rgba(255,255,255,0.4)', fontSize: 13, fontWeight: '600',
+    textAlign: 'center', paddingVertical: 28,
+  },
+  row: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14, marginTop: 10, paddingRight: 6,
+  },
+  rowActive: { borderColor: C.greenBorder, backgroundColor: C.greenDim },
+  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  name: { color: '#FFFFFF', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
+  meta: { color: 'rgba(255,255,255,0.4)', fontSize: 9, fontWeight: '900', letterSpacing: 1.2, marginTop: 3 },
+  manageBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+  },
 });

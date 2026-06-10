@@ -19,6 +19,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useToast } from '@/components/ui/Toast';
 import { getMarkerConfig } from '@/constants/markerTypes';
 import { updateMarker } from '@/services/markers';
+import { logEvent } from '@/services/groupEvents';
 import { timeAgo } from '@/utils/time';
 
 interface MarkerDetailSheetProps {
@@ -76,6 +77,9 @@ export const MarkerDetailSheet: React.FC<MarkerDetailSheetProps> = memo(
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            if (userId && marker.group_id) {
+              logEvent(marker.group_id, userId, 'marker_deleted', `Marker removed: ${marker.title}`, undefined).catch(() => {});
+            }
             await deleteMarker(marker.id);
             onClose();
           },

@@ -434,6 +434,12 @@ export type GroupEventType =
   | 'sos_cancelled'
   | 'rally_point_set'
   | 'checkin_timer_missed'
+  | 'checkin_timer_completed'
+  | 'deadman_triggered'
+  | 'deadman_cancelled'
+  | 'arrival'
+  | 'member_offline'
+  | 'member_online'
   | 'low_signal_alert';
 
 export interface DbGroupEvent {

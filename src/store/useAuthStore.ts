@@ -20,10 +20,12 @@ interface AuthState {
   signUp: (email: string, password: string, displayName: string) => Promise<boolean>;
   updateProfile: (
     updates: Partial<
-      Pick<Profile, 'display_name' | 'nickname' | 'initials' | 'avatar_url' | 'phone' | 'default_sharing_mode'>
+      Pick<Profile, 'display_name' | 'nickname' | 'initials' | 'avatar_url' | 'phone' | 'default_sharing_mode'
+        | 'blood_type' | 'allergies' | 'medications' | 'medical_notes' | 'medical_share_with_crew'>
     >,
   ) => Promise<boolean>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<boolean>;
   clearError: () => void;
   /** Convenience — avoids null-chaining everywhere */
   user: { id: string; email?: string } | null;
@@ -133,6 +135,16 @@ export const useAuthStore = create<AuthState>()(
         if (userId) await authService.markOffline(userId).catch(() => {});
         await authService.signOut();
         set({ session: null, profile: null, user: null, error: null });
+      },
+
+      deleteAccount: async () => {
+        const result = await authService.deleteAccount();
+        if (result.success) {
+          set({ session: null, profile: null, user: null, error: null });
+          return true;
+        }
+        set({ error: result.error ?? 'Account deletion failed' });
+        return false;
       },
 
       clearError: () => set({ error: null }),

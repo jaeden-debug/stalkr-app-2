@@ -22,6 +22,20 @@ Notifications.setNotificationHandler({
       );
     }
 
+    // Per-crew override: a muted crew (or crew-activity turned off for this crew)
+    // suppresses crew zone-activity alerts on top of the global default.
+    if (!suppress && type === 'zone_crew') {
+      try {
+        const { useGroupStore } = require('@/store/useGroupStore');
+        const { useCrewPrefsStore } = require('@/store/useCrewPrefsStore');
+        const gid = useGroupStore.getState().activeGroupId;
+        if (gid) {
+          const cp = useCrewPrefsStore.getState().getCrewPref(gid);
+          if (cp.muted || cp.crewZoneActivity === false) suppress = true;
+        }
+      } catch {}
+    }
+
     return {
       shouldShowAlert: !suppress,
       shouldShowBanner: !suppress,
@@ -128,6 +142,8 @@ export async function sendPushNotification(
   data?: Record<string, unknown>,
   channelId?: string,
   recipientUserIds?: string[],
+  groupId?: string,
+  fromUserId?: string,
 ): Promise<void> {
   const valid = tokens.filter((t) => t?.startsWith('ExponentPushToken'));
   if (valid.length === 0) return;
@@ -151,6 +167,8 @@ export async function sendPushNotification(
         channelId: channelId ?? 'default',
         type: (data as any)?.type ?? 'general',
         recipientUserIds,
+        groupId,
+        fromUserId,
       }),
     });
   } catch (err) {

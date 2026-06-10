@@ -55,6 +55,8 @@ Deno.serve(async (req) => {
       channelId = 'default',
       type,
       recipientUserIds,
+      groupId,
+      fromUserId,
     } = await req.json() as {
       tokens: string[];
       title: string;
@@ -63,43 +65,68 @@ Deno.serve(async (req) => {
       channelId?: string;
       type: string;
       recipientUserIds?: string[];
+      groupId?: string;
+      fromUserId?: string;
     };
 
     if (!tokens?.length) {
       return json({ sent: 0, filtered: 0 });
     }
 
-    // Determine which tokens to actually send to
-    let allowedTokens = tokens.filter((t) => t?.startsWith('ExponentPushToken'));
+    const isSafetyOverride = type === 'sos'; // SOS always delivers (life-safety)
+    const haveRecipients = !!recipientUserIds?.length && recipientUserIds.length === tokens.length;
+    const optedOut = new Set<string>();
 
-    // If we have user IDs and a mappable type, filter by prefs
-    const prefColumn = TYPE_TO_COLUMN[type];
-    if (prefColumn && recipientUserIds?.length && recipientUserIds.length === tokens.length) {
+    // Layered server-side filtering: global → per-crew → per-member.
+    if (haveRecipients && !isSafetyOverride) {
       const supabase = createClient(
         Deno.env.get('SUPABASE_URL')!,
         Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
       );
+      const ids = recipientUserIds!;
 
-      const { data: prefs } = await supabase
-        .from('user_notification_prefs')
-        .select(`user_id, ${prefColumn}`)
-        .in('user_id', recipientUserIds);
+      const prefColumn = TYPE_TO_COLUMN[type];
+      if (prefColumn) {
+        const { data: prefs } = await supabase
+          .from('user_notification_prefs')
+          .select(`user_id, ${prefColumn}`)
+          .in('user_id', ids);
+        prefs?.forEach((row: any) => { if (row[prefColumn] === false) optedOut.add(row.user_id); });
+      }
 
-      if (prefs) {
-        // Build a set of opted-out user IDs
-        const optedOut = new Set<string>(
-          prefs
-            .filter((row: any) => row[prefColumn] === false)
-            .map((row: any) => row.user_id as string),
-        );
+      if (groupId) {
+        const { data: crewPrefs } = await supabase
+          .from('crew_notification_prefs')
+          .select('user_id, muted, notify_crew_zone_activity')
+          .eq('group_id', groupId)
+          .in('user_id', ids);
+        crewPrefs?.forEach((row: any) => {
+          if (row.muted === true) optedOut.add(row.user_id);
+          if (type === 'zone_crew' && row.notify_crew_zone_activity === false) optedOut.add(row.user_id);
+        });
+      }
 
-        // Filter tokens: keep only tokens whose paired user has NOT opted out
-        allowedTokens = tokens.filter((token, i) => {
-          const uid = recipientUserIds[i];
-          return token?.startsWith('ExponentPushToken') && !optedOut.has(uid);
+      if (groupId && fromUserId) {
+        const { data: memPrefs } = await supabase
+          .from('member_notification_prefs')
+          .select('user_id, muted, notify_enter, notify_leave, notify_overstay')
+          .eq('group_id', groupId)
+          .eq('target_user_id', fromUserId)
+          .in('user_id', ids);
+        memPrefs?.forEach((row: any) => {
+          if (row.muted === true) optedOut.add(row.user_id);
+          if (type === 'zone_enter' && row.notify_enter === false) optedOut.add(row.user_id);
+          if (type === 'zone_leave' && row.notify_leave === false) optedOut.add(row.user_id);
+          if (type === 'zone_stay' && row.notify_overstay === false) optedOut.add(row.user_id);
         });
       }
     }
+
+    const allowedTokens = tokens.filter((token, i) => {
+      if (!token?.startsWith('ExponentPushToken')) return false;
+      if (!haveRecipients) return true;
+      return !optedOut.has(recipientUserIds![i]);
+    });
 
     if (allowedTokens.length === 0) {
       return json({ sent: 0, filtered: tokens.length });

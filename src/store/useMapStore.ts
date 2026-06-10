@@ -6,6 +6,7 @@ import type { Marker, SavedPlace, MapCrewMember, SelectedMapUser, RallyPoint } f
 import type { MarkerType, LatLng } from '@/types/database';
 import * as markerService from '@/services/markers';
 import * as savedPlaceService from '@/services/savedPlaces';
+import { logEvent } from '@/services/groupEvents';
 import { useAuthStore } from './useAuthStore';
 import { useGroupStore } from './useGroupStore';
 
@@ -14,11 +15,30 @@ interface MapState {
   isSatellite: boolean;
   centerTrigger: number;
 
+  // Map search / pending destination
+  searchOpen: boolean;
+  searchedPlace: { name: string; address?: string; latitude: number; longitude: number } | null;
+
+  // Measure tool
+  measuring: boolean;
+  measurePoints: LatLng[];
+  units: 'metric' | 'imperial';
+
+  // Layer filters
+  hiddenMarkerTypes: MarkerType[];
+  showZones: boolean;
+  showTrails: boolean;
+  filterSheetOpen: boolean;
+
   // Crew locations (keyed by userId)
   crewLocations: Record<string, MapCrewMember>;
 
   // My location
-  myLocation: { latitude: number; longitude: number; heading: number; accuracy: number } | null;
+  myLocation: { latitude: number; longitude: number; heading: number; accuracy: number; speed?: number } | null;
+
+  // "Go to" focus target (member card → recenter map). Bumped to retrigger.
+  goToTarget: LatLng | null;
+  goToTrigger: number;
 
   // Selected UI state
   selectedMapUser: SelectedMapUser | null;
@@ -39,6 +59,9 @@ interface MapState {
   placingSavedPlace: boolean; // alias for placingCircleZone
   placingPolygonZone: boolean;
   polygonDraftPoints: LatLng[];
+  // Live circle draft while placing a circle zone (center + radius in metres).
+  // Null until the user taps to drop the center.
+  circleDraft: { center: LatLng; radius: number } | null;
   movingZoneId: string | null;
   draggingMarkerId: string | null;
 
@@ -46,6 +69,7 @@ interface MapState {
   pendingZoneCreation: {
     type: 'circle' | 'polygon';
     coords: LatLng;
+    radius?: number;
     polygonPoints?: LatLng[];
   } | null;
 
@@ -66,12 +90,34 @@ interface MapState {
   handleMapTap: (coords: LatLng) => void;
   handleMapLongPress: (coords: LatLng) => void;
 
+  // Map search / pending destination
+  setSearchOpen: (v: boolean) => void;
+  setSearchedPlace: (p: { name: string; address?: string; latitude: number; longitude: number } | null) => void;
+  clearSearchedPlace: () => void;
+  startCircleZoneAt: (center: LatLng) => void;
+
+  // Measure tool
+  startMeasure: () => void;
+  stopMeasure: () => void;
+  addMeasurePoint: (p: LatLng) => void;
+  undoMeasurePoint: () => void;
+  clearMeasure: () => void;
+  toggleUnits: () => void;
+
+  // Layer filters
+  toggleMarkerType: (type: MarkerType) => void;
+  setAllMarkerTypes: (visible: boolean, allTypes: MarkerType[]) => void;
+  setShowZones: (v: boolean) => void;
+  setShowTrails: (v: boolean) => void;
+  setFilterSheetOpen: (v: boolean) => void;
+
   // Crew locations
   setCrewLocation: (userId: string, loc: MapCrewMember) => void;
   removeCrewLocation: (userId: string) => void;
 
   // My location
-  setMyLocation: (loc: { latitude: number; longitude: number; heading: number; accuracy: number }) => void;
+  setMyLocation: (loc: { latitude: number; longitude: number; heading: number; accuracy: number; speed?: number }) => void;
+  goTo: (coords: LatLng) => void;
 
   // Selection
   setSelectedMapUser: (u: SelectedMapUser | null) => void;
@@ -86,6 +132,8 @@ interface MapState {
   placeMarker: (coords: LatLng) => Promise<Marker | null>;
   deleteMarker: (markerId: string) => Promise<boolean>;
   updateMarkerInStore: (markerId: string, updates: Partial<Marker>) => void;
+  upsertMarkerInStore: (marker: Marker) => void;
+  removeMarkerFromStore: (markerId: string) => void;
 
   // Saved places / zones
   loadSavedPlaces: (groupId?: string | null) => Promise<void>;
@@ -99,6 +147,11 @@ interface MapState {
   addPolygonDraftPoint: (point: LatLng) => void; // alias
   removeLastPolygonPoint: () => void;
   finishPolygonZone: () => void;
+  // Circle draft
+  setCircleDraftCenter: (center: LatLng) => void;
+  setCircleDraftRadius: (radius: number) => void;
+  backCircleDraft: () => void;
+  confirmCircleDraft: () => void;
   confirmZoneCreation: (name: string, notifyArrival: boolean, notifyLeave: boolean) => Promise<SavedPlace | null>;
   cancelZoneCreation: () => void;
   setMovingZoneId: (id: string | null) => void;
@@ -127,6 +180,17 @@ export const useMapStore = create<MapState>()(
     (set, get) => ({
       isSatellite: true,
       centerTrigger: 0,
+      searchOpen: false,
+      searchedPlace: null,
+      measuring: false,
+      measurePoints: [],
+      units: 'imperial',
+      hiddenMarkerTypes: [],
+      showZones: true,
+      showTrails: true,
+      filterSheetOpen: false,
+      goToTarget: null,
+      goToTrigger: 0,
       crewLocations: {},
       myLocation: null,
       selectedMapUser: null,
@@ -144,6 +208,7 @@ export const useMapStore = create<MapState>()(
       placingPolygonZone: false,
       pendingZoneCreation: null,
       polygonDraftPoints: [],
+      circleDraft: null,
       movingZoneId: null,
       draggingMarkerId: null,
       userTrails: {},
@@ -155,8 +220,51 @@ export const useMapStore = create<MapState>()(
       toggleSatellite: () => set((s) => ({ isSatellite: !s.isSatellite })),
       triggerCenterMap: () => set((s) => ({ centerTrigger: s.centerTrigger + 1 })),
 
+      setSearchOpen: (v) => set({ searchOpen: v }),
+      setSearchedPlace: (p) => set({ searchedPlace: p }),
+      clearSearchedPlace: () => set({ searchedPlace: null }),
+
+      // ── Measure tool ──
+      startMeasure: () => set({ measuring: true, measurePoints: [] }),
+      stopMeasure: () => set({ measuring: false, measurePoints: [] }),
+      addMeasurePoint: (p) => set((s) => ({ measurePoints: [...s.measurePoints, p] })),
+      undoMeasurePoint: () => set((s) => ({ measurePoints: s.measurePoints.slice(0, -1) })),
+      clearMeasure: () => set({ measurePoints: [] }),
+      toggleUnits: () => set((s) => ({ units: s.units === 'metric' ? 'imperial' : 'metric' })),
+
+      // ── Layer filters ──
+      toggleMarkerType: (type) =>
+        set((s) => ({
+          hiddenMarkerTypes: s.hiddenMarkerTypes.includes(type)
+            ? s.hiddenMarkerTypes.filter((t) => t !== type)
+            : [...s.hiddenMarkerTypes, type],
+        })),
+      setAllMarkerTypes: (visible, allTypes) =>
+        set({ hiddenMarkerTypes: visible ? [] : [...allTypes] }),
+      setShowZones: (v) => set({ showZones: v }),
+      setShowTrails: (v) => set({ showTrails: v }),
+      setFilterSheetOpen: (v) => set({ filterSheetOpen: v }),
+
+      // Begin a circle-zone draft pre-centered on a searched place. The existing
+      // placement toolbar (DRAG TO SIZE · BACK · CONFIRM) then takes over.
+      startCircleZoneAt: (center) =>
+        set({
+          placingCircleZone: true,
+          placingSavedPlace: true,
+          placingPolygonZone: false,
+          polygonDraftPoints: [],
+          circleDraft: { center, radius: 100 },
+          searchedPlace: null,
+          searchOpen: false,
+        }),
+
       handleMapTap: (coords) => {
         const { placingMarker, placingCircleZone, placingPolygonZone } = get();
+        if (get().measuring) {
+          Haptics.selectionAsync();
+          get().addMeasurePoint(coords);
+          return;
+        }
         if (placingMarker) {
           get().placeMarker(coords);
           return;
@@ -166,12 +274,12 @@ export const useMapStore = create<MapState>()(
           return;
         }
         if (placingCircleZone) {
-          // Store coords and show ZoneCreationSheet
-          set({
-            placingCircleZone: false,
-            placingSavedPlace: false,
-            pendingZoneCreation: { type: 'circle', coords },
-          });
+          // First tap drops the center → show a live, adjustable draft circle.
+          // Further taps are ignored; the user resizes/moves via the handles.
+          if (!get().circleDraft) {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            set({ circleDraft: { center: coords, radius: 100 } });
+          }
           return;
         }
         // Deselect everything
@@ -196,6 +304,7 @@ export const useMapStore = create<MapState>()(
         }),
 
       setMyLocation: (loc) => set({ myLocation: loc }),
+      goTo: (coords) => set((s) => ({ goToTarget: coords, goToTrigger: s.goToTrigger + 1 })),
 
       setSelectedMapUser: (u) => set({ selectedMapUser: u }),
       setSelectedMarkerId: (id) => set({ selectedMarkerId: id, selectedFieldMarkerId: id }),
@@ -243,6 +352,9 @@ export const useMapStore = create<MapState>()(
             placingMarker: false,
             selectedMarkerType: null,
           }));
+          logEvent(groupId, userId, 'marker_created', `Marker: ${marker.title}`,
+            `${marker.type.replace('_', ' ')} placed.`,
+            { latitude: marker.latitude, longitude: marker.longitude }).catch(() => {});
         }
         return marker;
       },
@@ -258,6 +370,19 @@ export const useMapStore = create<MapState>()(
           markers: s.markers.map((m) => (m.id === markerId ? { ...m, ...updates } : m)),
         })),
 
+      upsertMarkerInStore: (marker) =>
+        set((s) => {
+          const exists = s.markers.some((m) => m.id === marker.id);
+          return {
+            markers: exists
+              ? s.markers.map((m) => (m.id === marker.id ? marker : m))
+              : [marker, ...s.markers],
+          };
+        }),
+
+      removeMarkerFromStore: (markerId) =>
+        set((s) => ({ markers: s.markers.filter((m) => m.id !== markerId) })),
+
       loadSavedPlaces: async (groupId) => {
         const gid = groupId ?? useGroupStore.getState().activeGroupId;
         if (!gid) return;
@@ -267,19 +392,19 @@ export const useMapStore = create<MapState>()(
       },
 
       startCircleZonePlacement: () =>
-        set({ placingCircleZone: true, placingSavedPlace: true, placingPolygonZone: false, polygonDraftPoints: [] }),
+        set({ placingCircleZone: true, placingSavedPlace: true, placingPolygonZone: false, polygonDraftPoints: [], circleDraft: null }),
       startSavedPlacePlacement: () =>
-        set({ placingCircleZone: true, placingSavedPlace: true, placingPolygonZone: false, polygonDraftPoints: [] }),
+        set({ placingCircleZone: true, placingSavedPlace: true, placingPolygonZone: false, polygonDraftPoints: [], circleDraft: null }),
 
       startPolygonZonePlacement: () =>
-        set({ placingPolygonZone: true, placingCircleZone: false, placingSavedPlace: false, polygonDraftPoints: [] }),
+        set({ placingPolygonZone: true, placingCircleZone: false, placingSavedPlace: false, polygonDraftPoints: [], circleDraft: null }),
 
       cancelZonePlacement: () =>
-        set({ placingCircleZone: false, placingSavedPlace: false, placingPolygonZone: false, polygonDraftPoints: [] }),
+        set({ placingCircleZone: false, placingSavedPlace: false, placingPolygonZone: false, polygonDraftPoints: [], circleDraft: null }),
       cancelSavedPlacePlacement: () =>
-        set({ placingCircleZone: false, placingSavedPlace: false, placingPolygonZone: false, polygonDraftPoints: [] }),
+        set({ placingCircleZone: false, placingSavedPlace: false, placingPolygonZone: false, polygonDraftPoints: [], circleDraft: null }),
       cancelPolygonZonePlacement: () =>
-        set({ placingCircleZone: false, placingSavedPlace: false, placingPolygonZone: false, polygonDraftPoints: [] }),
+        set({ placingCircleZone: false, placingSavedPlace: false, placingPolygonZone: false, polygonDraftPoints: [], circleDraft: null }),
 
       addPolygonPoint: (point) =>
         set((s) => ({ polygonDraftPoints: [...s.polygonDraftPoints, point] })),
@@ -305,6 +430,44 @@ export const useMapStore = create<MapState>()(
         });
       },
 
+      // ── Circle draft (place → adjust → confirm) ──────────────────────────────
+      setCircleDraftCenter: (center) =>
+        set((s) => (s.circleDraft ? { circleDraft: { ...s.circleDraft, center } } : {})),
+
+      setCircleDraftRadius: (radius) =>
+        set((s) =>
+          s.circleDraft
+            ? { circleDraft: { ...s.circleDraft, radius: Math.max(20, Math.min(20000, Math.round(radius))) } }
+            : {},
+        ),
+
+      backCircleDraft: () => {
+        // Step back: if a draft exists, clear it (re-place center). Otherwise
+        // exit placement entirely.
+        if (get().circleDraft) {
+          Haptics.selectionAsync();
+          set({ circleDraft: null });
+        } else {
+          set({ placingCircleZone: false, placingSavedPlace: false });
+        }
+      },
+
+      confirmCircleDraft: () => {
+        const { circleDraft } = get();
+        if (!circleDraft) return;
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        set({
+          placingCircleZone: false,
+          placingSavedPlace: false,
+          circleDraft: null,
+          pendingZoneCreation: {
+            type: 'circle',
+            coords: circleDraft.center,
+            radius: circleDraft.radius,
+          },
+        });
+      },
+
       confirmZoneCreation: async (name, notifyArrival, notifyLeave) => {
         const { pendingZoneCreation } = get();
         if (!pendingZoneCreation) return null;
@@ -313,7 +476,7 @@ export const useMapStore = create<MapState>()(
         const groupId = useGroupStore.getState().activeGroupId;
         if (!userId || !groupId) return null;
 
-        const { type, coords, polygonPoints } = pendingZoneCreation;
+        const { type, coords, polygonPoints, radius } = pendingZoneCreation;
         set({ pendingZoneCreation: null });
 
         const place = await savedPlaceService.createSavedPlace({
@@ -323,7 +486,7 @@ export const useMapStore = create<MapState>()(
           type: 'custom',
           latitude: coords.latitude,
           longitude: coords.longitude,
-          radius_meters: 100,
+          radius_meters: type === 'circle' ? Math.round(radius ?? 100) : 100,
           shape_type: type,
           polygon_coords: type === 'polygon' ? polygonPoints : [],
           notify_on_arrival: notifyArrival,
@@ -334,11 +497,13 @@ export const useMapStore = create<MapState>()(
 
         if (place) {
           set((s) => ({ savedPlaces: [place, ...s.savedPlaces] }));
+          logEvent(groupId, userId, 'zone_created', `Zone: ${place.name}`,
+            `${type === 'polygon' ? 'Polygon' : 'Circle'} zone created.`).catch(() => {});
         }
         return place;
       },
 
-      cancelZoneCreation: () => set({ pendingZoneCreation: null, polygonDraftPoints: [] }),
+      cancelZoneCreation: () => set({ pendingZoneCreation: null, polygonDraftPoints: [], circleDraft: null }),
 
       setMovingZoneId: (id) => set({ movingZoneId: id }),
       setDraggingMarkerId: (id) => set({ draggingMarkerId: id }),
@@ -390,6 +555,10 @@ export const useMapStore = create<MapState>()(
         isSatellite: s.isSatellite,
         visibleTrailUsers: s.visibleTrailUsers,
         trailHistoryHours: s.trailHistoryHours,
+        units: s.units,
+        showZones: s.showZones,
+        showTrails: s.showTrails,
+        hiddenMarkerTypes: s.hiddenMarkerTypes,
       }),
     },
   ),

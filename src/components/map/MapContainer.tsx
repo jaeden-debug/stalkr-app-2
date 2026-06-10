@@ -3,12 +3,15 @@
  * All sub-layers are memoized. Self marker only rerenders on self moves.
  * Crew markers only rerender on their own data changes.
  */
-import React, { useCallback, useEffect, useRef } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
-import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Polygon } from 'react-native-maps';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Polygon, Circle } from 'react-native-maps';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { MAP_CONSTANTS } from '@/constants/map';
+import { getDistance } from '@/utils/distance';
 import { SelfMarker } from './SelfMarker';
 import { CrewMarkerLayer } from './CrewMarkerLayer';
 import { MarkerLayer } from './MarkerLayer';
@@ -21,6 +24,7 @@ import { MapControls } from './MapControls';
 export const MapContainer: React.FC = () => {
   const mapRef = useRef<MapView>(null);
   const hasAutocentered = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
 
   const isSatellite = useMapStore((s) => s.isSatellite);
   const centerTrigger = useMapStore((s) => s.centerTrigger);
@@ -28,36 +32,86 @@ export const MapContainer: React.FC = () => {
   const userId = useAuthStore((s) => s.user?.id);
   const polygonDraftPoints = useMapStore((s) => s.polygonDraftPoints);
   const placingPolygonZone = useMapStore((s) => s.placingPolygonZone);
+  const placingCircleZone = useMapStore((s) => s.placingCircleZone);
+  const circleDraft = useMapStore((s) => s.circleDraft);
+  const searchedPlace = useMapStore((s) => s.searchedPlace);
+  const goToTarget = useMapStore((s) => s.goToTarget);
+  const goToTrigger = useMapStore((s) => s.goToTrigger);
+  const measuring = useMapStore((s) => s.measuring);
+  const measurePoints = useMapStore((s) => s.measurePoints);
 
-  // Auto-center once on first GPS fix
-  useEffect(() => {
-    if (myLocation && !hasAutocentered.current) {
-      hasAutocentered.current = true;
+  const centerOnMe = useCallback(
+    (duration: number) => {
+      const loc = useMapStore.getState().myLocation;
+      if (!loc) return;
       mapRef.current?.animateToRegion(
         {
-          latitude: myLocation.latitude,
-          longitude: myLocation.longitude,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
           latitudeDelta: MAP_CONSTANTS.INITIAL_ZOOM.latitudeDelta,
           longitudeDelta: MAP_CONSTANTS.INITIAL_ZOOM.longitudeDelta,
         },
-        800,
+        duration,
       );
+    },
+    [],
+  );
+
+  // Auto-center once — only after BOTH the map is ready and a GPS fix exists.
+  // (Calling animateToRegion before the native map is laid out silently no-ops,
+  // which is why the marker used to stay off-screen until CENTER was pressed.)
+  useEffect(() => {
+    if (mapReady && myLocation && !hasAutocentered.current) {
+      hasAutocentered.current = true;
+      // next tick so the first layout pass has fully settled
+      requestAnimationFrame(() => centerOnMe(800));
     }
-  }, [myLocation]);
+  }, [mapReady, myLocation, centerOnMe]);
 
   useEffect(() => {
-    if (centerTrigger > 0 && myLocation) {
+    if (centerTrigger > 0 && mapReady) centerOnMe(600);
+  }, [centerTrigger, mapReady, centerOnMe]);
+
+  // "Go to" a member / location from a card.
+  useEffect(() => {
+    if (goToTrigger > 0 && mapReady && goToTarget) {
       mapRef.current?.animateToRegion(
         {
-          latitude: myLocation.latitude,
-          longitude: myLocation.longitude,
+          latitude: goToTarget.latitude,
+          longitude: goToTarget.longitude,
           latitudeDelta: MAP_CONSTANTS.INITIAL_ZOOM.latitudeDelta,
           longitudeDelta: MAP_CONSTANTS.INITIAL_ZOOM.longitudeDelta,
         },
         600,
       );
     }
-  }, [centerTrigger]);
+  }, [goToTrigger, mapReady, goToTarget]);
+
+  // Focus the map on a freshly searched place.
+  useEffect(() => {
+    if (mapReady && searchedPlace) {
+      mapRef.current?.animateToRegion(
+        {
+          latitude: searchedPlace.latitude,
+          longitude: searchedPlace.longitude,
+          latitudeDelta: MAP_CONSTANTS.INITIAL_ZOOM.latitudeDelta,
+          longitudeDelta: MAP_CONSTANTS.INITIAL_ZOOM.longitudeDelta,
+        },
+        600,
+      );
+    }
+  }, [searchedPlace, mapReady]);
+
+  // Live edge handle for the circle draft, projected `radius` metres east of centre.
+  const circleEdge = circleDraft
+    ? {
+        latitude: circleDraft.center.latitude,
+        longitude:
+          circleDraft.center.longitude +
+          circleDraft.radius /
+            (111320 * Math.cos((circleDraft.center.latitude * Math.PI) / 180)),
+      }
+    : null;
 
   const handleMapPress = useCallback(
     (e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
@@ -81,6 +135,7 @@ export const MapContainer: React.FC = () => {
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
         mapType={isSatellite ? 'hybrid' : 'standard'}
         initialRegion={MAP_CONSTANTS.DEFAULT_REGION}
+        onMapReady={() => setMapReady(true)}
         showsUserLocation={false}
         showsCompass={false}
         showsScale={false}
@@ -120,10 +175,87 @@ export const MapContainer: React.FC = () => {
                 key={`draft-${idx}`}
                 coordinate={pt}
                 anchor={{ x: 0.5, y: 0.5 }}
-                tracksViewChanges={false}
+                tracksViewChanges
                 zIndex={21}
               >
                 <View style={styles.draftDot} />
+              </Marker>
+            ))}
+          </>
+        )}
+        {/* ── Circle draft overlay (place → drag centre / edge → confirm) ── */}
+        {placingCircleZone && circleDraft && circleEdge && (
+          <>
+            <Circle
+              center={circleDraft.center}
+              radius={circleDraft.radius}
+              strokeColor="#22c55e"
+              strokeWidth={2}
+              fillColor="rgba(34,197,94,0.15)"
+              zIndex={18}
+            />
+            {/* Centre handle — drag to move the whole zone */}
+            <Marker
+              coordinate={circleDraft.center}
+              anchor={{ x: 0.5, y: 0.5 }}
+              draggable
+              tracksViewChanges
+              onDragStart={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
+              onDrag={(e) => useMapStore.getState().setCircleDraftCenter(e.nativeEvent.coordinate)}
+              onDragEnd={(e) => useMapStore.getState().setCircleDraftCenter(e.nativeEvent.coordinate)}
+              zIndex={22}
+            >
+              <View style={styles.centerHandle}>
+                <View style={styles.centerHandleDot} />
+              </View>
+            </Marker>
+            {/* Edge handle — drag to resize */}
+            <Marker
+              coordinate={circleEdge}
+              anchor={{ x: 0.5, y: 0.5 }}
+              draggable
+              tracksViewChanges
+              onDragStart={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
+              onDrag={(e) =>
+                useMapStore
+                  .getState()
+                  .setCircleDraftRadius(getDistance(circleDraft.center, e.nativeEvent.coordinate))
+              }
+              onDragEnd={(e) =>
+                useMapStore
+                  .getState()
+                  .setCircleDraftRadius(getDistance(circleDraft.center, e.nativeEvent.coordinate))
+              }
+              zIndex={22}
+            >
+              <View style={styles.edgeHandle}>
+                <View style={styles.edgeHandleInner} />
+              </View>
+            </Marker>
+          </>
+        )}
+        {/* ── Searched place pin (pre-journey destination) ── */}
+        {searchedPlace && (
+          <Marker
+            coordinate={{ latitude: searchedPlace.latitude, longitude: searchedPlace.longitude }}
+            anchor={{ x: 0.5, y: 1 }}
+            tracksViewChanges
+            zIndex={40}
+          >
+            <View style={styles.searchPin}>
+              <Ionicons name="location" size={20} color="#000" />
+            </View>
+          </Marker>
+        )}
+        {/* ── Measure overlay ── */}
+        {measuring && measurePoints.length > 0 && (
+          <>
+            {measurePoints.length >= 2 && (
+              <Polyline coordinates={measurePoints} strokeColor="#4ADE80" strokeWidth={3} lineDashPattern={[2, 6]} zIndex={30} />
+            )}
+            {measurePoints.map((p, i) => (
+              <Marker key={`measure-${i}`} coordinate={p} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges zIndex={31}>
+                <View style={styles.measureDot}><Text style={styles.measureDotText}>{i + 1}</Text></View>
               </Marker>
             ))}
           </>
@@ -156,5 +288,63 @@ const styles = StyleSheet.create({
     backgroundColor: '#22c55e',
     borderWidth: 2,
     borderColor: '#ffffff',
+  },
+  centerHandle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(34,197,94,0.25)',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+  centerHandleDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#ffffff',
+  },
+  edgeHandle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#22c55e',
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  edgeHandleInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#0a0a0f',
+  },
+  measureDot: {
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: '#4ADE80', borderWidth: 2, borderColor: '#0a0a0f',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  measureDotText: { color: '#000', fontSize: 11, fontWeight: '900' },
+  searchPin: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#4ADE80',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    shadowColor: '#4ADE80',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    elevation: 10,
   },
 });

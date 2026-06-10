@@ -13,6 +13,8 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useBillingStore } from '@/store/useBillingStore';
 import { useGroupStore } from '@/store/useGroupStore';
 import { loadNotificationPrefs } from '@/store/useNotificationStore';
+import { useCrewPrefsStore } from '@/store/useCrewPrefsStore';
+import { useSafetyStore } from '@/store/useSafetyStore';
 import { initSentry, setSentryUser, clearSentryUser } from '@/services/sentry';
 import { initPostHog, identifyUser, resetAnalytics } from '@/services/analytics';
 
@@ -37,6 +39,11 @@ function RootLayoutInner() {
       if (gid) loadGroupMembers(gid);
       // Hydrate notification prefs from DB so settings are consistent across devices
       loadNotificationPrefs().catch(console.error);
+      const uid = useAuthStore.getState().user?.id;
+      if (uid) {
+        useCrewPrefsStore.getState().hydrate(uid).catch(() => {});
+        useSafetyStore.getState().loadActive(uid).catch(() => {});
+      }
     });
     loadEntitlement();
   }, []);

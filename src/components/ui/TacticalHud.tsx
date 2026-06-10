@@ -20,18 +20,16 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { useMapStore } from '@/store/useMapStore';
 import { useGroupStore } from '@/store/useGroupStore';
-import { useLocationStore } from '@/store/useLocationStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useHeading } from '@/hooks/useHeading';
 import { getDistance, formatDistance } from '@/utils/distance';
+import { formatSpeed } from '@/utils/heading';
 import { C } from '@/constants/theme';
 import { buildWatchUrl } from '@/services/sessions';
-
-const PILL_W = 130;
-const PILL_H = 42;
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 
@@ -108,23 +106,20 @@ export const TacticalHud: React.FC = () => {
   const activeGroupId = useGroupStore((s) => s.activeGroupId);
   const activeGroup  = groups.find((g) => g.id === activeGroupId) ?? null;
 
-  const isBroadcasting = useLocationStore((s) => s.isBroadcasting);
-
   const activeJourney = useSessionStore((s) => s.activeJourneySession);
-  const markArrived   = useSessionStore((s) => s.markArrived);
   const endSession    = useSessionStore((s) => s.endSession);
   const elapsed       = useElapsedTime(activeJourney?.started_at);
 
-  const livePulse    = usePulse(isBroadcasting);
   const journeyPulse = usePulse(!!activeJourney, true);
 
   const handleCenter = useCallback(() => {
     if (myLocation) { Haptics.selectionAsync(); triggerCenter(); }
   }, [myLocation, triggerCenter]);
 
-  const handleSat = useCallback((toSat: boolean) => {
-    if (toSat !== isSatellite) { Haptics.selectionAsync(); toggleSatellite(); }
-  }, [isSatellite, toggleSatellite]);
+  const toggleMapType = useCallback(() => {
+    Haptics.selectionAsync();
+    toggleSatellite();
+  }, [toggleSatellite]);
 
   const handleShareJourney = useCallback(async () => {
     if (!activeJourney) return;
@@ -144,19 +139,25 @@ export const TacticalHud: React.FC = () => {
     endSession(activeJourney.id);
   }, [activeJourney, endSession]);
 
-  // ETA
-  const eta = React.useMemo(() => {
+  // ETA / arrival time / speed (live)
+  const etaInfo = React.useMemo(() => {
     if (
-      !activeJourney ||
-      !myLocation ||
+      !activeJourney || !myLocation ||
       activeJourney.destination_latitude == null ||
       activeJourney.destination_longitude == null
     ) return null;
-    return calcEta(
-      myLocation.latitude, myLocation.longitude,
-      activeJourney.destination_latitude, activeJourney.destination_longitude,
-      myLocation.heading >= 0 ? 0 : 0, // speed not in myLocation; skip for now
+    const spd = myLocation.speed ?? 0;
+    if (spd < 0.5) return null;
+    const dist = getDistance(
+      { latitude: myLocation.latitude, longitude: myLocation.longitude },
+      { latitude: activeJourney.destination_latitude, longitude: activeJourney.destination_longitude },
     );
+    const secs = dist / spd;
+    if (secs > 86400) return null;
+    const mins = Math.round(secs / 60);
+    const label = mins < 1 ? '< 1 min' : mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
+    const arrival = new Date(Date.now() + secs * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return { label, arrival, speed: spd };
   }, [activeJourney, myLocation]);
 
   // Distance to destination
@@ -175,92 +176,97 @@ export const TacticalHud: React.FC = () => {
 
   return (
     <SafeAreaView style={s.root} pointerEvents="box-none">
-      {/* Blackout gradient behind top pills */}
+      {/* Blackout gradient behind the header */}
       <View style={s.topFade} pointerEvents="none" />
 
-      <View style={s.topRow} pointerEvents="box-none">
-        {/* ── Left col ── */}
-        <View style={s.col} pointerEvents="box-none">
-          <View style={s.pill}>
-            <Text style={s.brand}>STALKR</Text>
-          </View>
-          <View style={[s.pill, { marginTop: 10 }]}>
-            <Animated.View style={[s.dot, { backgroundColor: isBroadcasting ? C.green : C.red, opacity: livePulse }]} />
-            <Text style={[s.pillSub, { color: isBroadcasting ? C.green : C.red }]}>
-              {isBroadcasting ? 'LIVE' : 'DARK'}
-            </Text>
-          </View>
+      {/* ── Single header bar: STALKR · crew · compass (glass) ── */}
+      <BlurView intensity={95} tint="dark" style={s.header} pointerEvents="box-none">
+        <Text style={s.brand}>STALKR</Text>
+        <Text style={s.crewName} numberOfLines={1}>
+          {activeGroup?.name?.toUpperCase() ?? 'NO ACTIVE CREW'}
+        </Text>
+        <View style={s.compassWrap}>
+          <Text style={s.compass}>
+            {direction} · {String(Math.round(magHeading)).padStart(3, '0')}°
+          </Text>
         </View>
+      </BlurView>
 
-        {/* ── Center — crew pill or journey pill ── */}
-        <View style={s.centerCol} pointerEvents="none">
-          {activeJourney ? (
-            <View style={[s.crewPill, s.journeyPill]}>
-              <Animated.View style={[s.dot, { backgroundColor: C.blue, opacity: journeyPulse }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={s.journeyLabel}>JOURNEY · {elapsed}</Text>
-                <Text style={s.journeyDest} numberOfLines={1}>
-                  {activeJourney.destination_name ?? activeJourney.name}
-                </Text>
-                {distToDest && (
-                  <Text style={s.journeyMeta}>{distToDest} away</Text>
-                )}
-              </View>
-            </View>
-          ) : (
-            <View style={s.crewPill}>
-              <View style={s.crewPillInner}>
-                <Text style={s.crewLabel}>CREW</Text>
-                <Text style={s.crewName} numberOfLines={1}>
-                  {activeGroup?.name?.toUpperCase() ?? 'NO ACTIVE CREW'}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {/* Journey action row */}
-          {activeJourney && (
-            <View style={s.journeyActions} pointerEvents="box-none">
-              <TouchableOpacity style={s.journeyShareBtn} onPress={handleShareJourney} activeOpacity={0.8}>
-                <Ionicons name="share-social" size={13} color={C.blue} />
-                <Text style={[s.journeyBtnText, { color: C.blue }]}>SHARE</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.journeyEndBtn} onPress={handleEndJourney} activeOpacity={0.8}>
-                <Ionicons name="stop-circle" size={13} color={C.red} />
-                <Text style={[s.journeyBtnText, { color: C.red }]}>END</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-
-        {/* ── Right col ── */}
-        <View style={[s.col, { alignItems: 'flex-end' }]} pointerEvents="box-none">
-          <View style={s.pill}>
-            <Text style={s.compass}>
-              {direction} · {String(Math.round(magHeading)).padStart(3, '0')}°
+      {/* ── Active journey band (below header) ── */}
+      {activeJourney && (
+        <BlurView intensity={95} tint="dark" style={s.journeyBand} pointerEvents="box-none">
+          <Animated.View style={[s.dot, { backgroundColor: C.blue, opacity: journeyPulse }]} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.journeyLabel}>JOURNEY · {elapsed}</Text>
+            <Text style={s.journeyDest} numberOfLines={1}>
+              {activeJourney.destination_name ?? activeJourney.name}
             </Text>
+            <Text style={s.journeyMeta} numberOfLines={1}>
+              {distToDest ? `${distToDest} left` : 'En route'}
+              {etaInfo ? `  ·  ETA ${etaInfo.label}  ·  ${etaInfo.arrival}` : ''}
+            </Text>
+            {etaInfo && (
+              <Text style={s.journeyMeta} numberOfLines={1}>{formatSpeed(etaInfo.speed)}</Text>
+            )}
           </View>
-          <TouchableOpacity style={[s.pill, s.centerBtn]} onPress={handleCenter} activeOpacity={0.8}>
-            <Text style={s.centerBtnText}>CENTER</Text>
+          <TouchableOpacity style={s.journeyShareBtn} onPress={handleShareJourney} activeOpacity={0.8}>
+            <Ionicons name="share-social" size={13} color={C.blue} />
           </TouchableOpacity>
-        </View>
-      </View>
+          <TouchableOpacity style={s.journeyEndBtn} onPress={handleEndJourney} activeOpacity={0.8}>
+            <Ionicons name="stop-circle" size={13} color={C.red} />
+            <Text style={[s.journeyBtnText, { color: C.red }]}>END</Text>
+          </TouchableOpacity>
+        </BlurView>
+      )}
 
-      {/* ── MAP / SAT toggle — right mid ── */}
-      <View style={s.satWrap} pointerEvents="box-none">
+      {/* ── Right control stack: map/satellite toggle + center button (glass) ── */}
+      <View style={s.rightControls} pointerEvents="box-none">
         <TouchableOpacity
-          style={[s.satBtn, !isSatellite && s.satBtnActive]}
-          onPress={() => handleSat(false)}
-          activeOpacity={0.8}
+          style={s.ctrlBtn}
+          onPress={toggleMapType}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={isSatellite ? 'Switch to map view' : 'Switch to satellite view'}
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
-          <Text style={[s.satText, !isSatellite && s.satTextActive]}>MAP</Text>
+          <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <Ionicons name={isSatellite ? 'earth' : 'map'} size={22} color={isSatellite ? C.blue : C.green} />
         </TouchableOpacity>
+
         <TouchableOpacity
-          style={[s.satBtn, isSatellite && s.satBtnActive]}
-          onPress={() => handleSat(true)}
-          activeOpacity={0.8}
+          style={s.ctrlBtn}
+          onPress={handleCenter}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Center on my location"
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
-          <Text style={[s.satText, isSatellite && s.satTextActive]}>SAT</Text>
+          <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <Ionicons name="locate" size={22} color={C.green} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={s.ctrlBtn}
+          onPress={() => { Haptics.selectionAsync(); useMapStore.getState().setFilterSheetOpen(true); }}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Map layers"
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        >
+          <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <Ionicons name="layers" size={20} color="#FFFFFF" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={s.ctrlBtn}
+          onPress={() => { Haptics.selectionAsync(); useMapStore.getState().startMeasure(); }}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Measure distance"
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        >
+          <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
+          <Ionicons name="resize" size={20} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -272,179 +278,106 @@ const s = StyleSheet.create({
   root: { ...StyleSheet.absoluteFill, pointerEvents: 'box-none' } as any,
 
   topFade: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 160,
+    position: 'absolute', top: 0, left: 0, right: 0, height: 150,
     backgroundColor: 'rgba(0,0,0,0.72)',
   },
 
-  topRow: {
+  // ── Single header bar (BlurView glass — matches NavigationDrawer) ──
+  header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    gap: 10,
-  },
-
-  col:       { width: PILL_W, gap: 0 },
-  centerCol: { flex: 1, alignItems: 'center' },
-
-  // Pills
-  pill: {
-    height: PILL_H,
-    width: PILL_W,
-    backgroundColor: 'rgba(14,14,20,0.95)',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
+    marginHorizontal: 14,
+    marginTop: 8,
+    height: 46,
+    paddingHorizontal: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(10,10,16,0.45)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
   },
   brand: {
     color: C.green,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '900',
     letterSpacing: 2,
-  },
-  pillSub: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 1.4,
-  },
-  compass: {
-    color: C.textPrimary,
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    fontVariant: ['tabular-nums'],
-  },
-  centerBtn: {
-    backgroundColor: C.green,
-    borderColor: C.green,
-    marginTop: 10,
-  },
-  centerBtnText: {
-    color: '#000',
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 1.2,
-  },
-
-  dot: {
-    width: 7, height: 7, borderRadius: 4,
-  },
-
-  // Crew pill
-  crewPill: {
-    backgroundColor: 'rgba(14,14,20,0.95)',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    width: '100%',
-    alignItems: 'center',
-  },
-  crewPillInner: { alignItems: 'center' },
-  crewLabel: {
-    color: C.green,
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 1.8,
+    width: 78,
   },
   crewName: {
-    color: C.textPrimary,
-    fontSize: 16,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-    marginTop: 2,
-  },
-
-  // Journey pill
-  journeyPill: {
-    borderColor: C.blueBorder,
-    backgroundColor: 'rgba(6,18,40,0.97)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  journeyLabel: {
-    color: C.blue,
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 1.6,
-  },
-  journeyDest: {
+    flex: 1,
+    textAlign: 'center',
     color: C.textPrimary,
     fontSize: 14,
     fontWeight: '900',
-    marginTop: 2,
+    letterSpacing: 0.8,
   },
-  journeyMeta: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: 1,
+  compassWrap: { width: 78, alignItems: 'flex-end' },
+  compass: {
+    color: C.textPrimary,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    fontVariant: ['tabular-nums'],
   },
 
-  journeyActions: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-    width: '100%',
-  },
-  journeyShareBtn: {
-    flex: 1,
+  dot: { width: 8, height: 8, borderRadius: 4 },
+
+  // ── Active journey band ──
+  journeyBand: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    backgroundColor: C.blueDim,
+    gap: 10,
+    marginHorizontal: 14,
+    marginTop: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(6,18,40,0.55)',
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: C.blueBorder,
-    borderRadius: 999,
-    paddingVertical: 8,
+  },
+  journeyLabel: { color: C.blue, fontSize: 9, fontWeight: '900', letterSpacing: 1.6 },
+  journeyDest: { color: C.textPrimary, fontSize: 14, fontWeight: '900', marginTop: 2 },
+  journeyMeta: { color: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: '700', marginTop: 1 },
+  journeyShareBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.blueDim, borderWidth: 1, borderColor: C.blueBorder,
   },
   journeyEndBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    backgroundColor: C.redDim,
-    borderWidth: 1,
-    borderColor: C.redBorder,
-    borderRadius: 999,
-    paddingVertical: 8,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 12, height: 38, borderRadius: 19,
+    backgroundColor: C.redDim, borderWidth: 1, borderColor: C.redBorder,
   },
-  journeyBtnText: {
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 1.2,
-  },
+  journeyBtnText: { fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
 
-  // MAP / SAT toggle
-  satWrap: {
+  // ── Right control stack: map/satellite toggle + center ──
+  rightControls: {
     position: 'absolute',
     right: 14,
-    top: '42%',
-    backgroundColor: 'rgba(14,14,20,0.95)',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    top: '40%',
+    gap: 12,
+  },
+  ctrlBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     overflow: 'hidden',
-  },
-  satBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    backgroundColor: 'rgba(10,10,16,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
     alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
   },
-  satBtnActive: { backgroundColor: C.green },
-  satText: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 1,
-  },
-  satTextActive: { color: '#000' },
 });

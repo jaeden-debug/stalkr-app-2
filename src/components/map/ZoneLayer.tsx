@@ -7,11 +7,13 @@
  * A ZoneLabelMarker at the centroid shows the zone name and handles taps.
  * When movingZoneId matches, the label marker becomes draggable to reposition.
  */
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Circle, Marker, Polygon } from 'react-native-maps';
+import * as Haptics from 'expo-haptics';
 import { useMapStore } from '@/store/useMapStore';
 import { updateSavedPlace } from '@/services/savedPlaces';
+import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
 import type { SavedPlace } from '@/types/models';
 import type { LatLng } from '@/types/database';
 
@@ -42,6 +44,7 @@ function centroid(coords: LatLng[]): LatLng {
 
 // ─── ZoneLayer ────────────────────────────────────────────────────────────────
 export const ZoneLayer: React.FC = memo(() => {
+  const showZones = useMapStore((s) => s.showZones);
   const circleIds = useMapStore((s) =>
     s.savedPlaces.filter((p) => p.shape_type !== 'polygon').map((p) => p.id),
   );
@@ -50,6 +53,8 @@ export const ZoneLayer: React.FC = memo(() => {
       .filter((p) => p.shape_type === 'polygon' && p.polygon_coords != null && Array.isArray(p.polygon_coords) && p.polygon_coords.length >= 3)
       .map((p) => p.id),
   );
+
+  if (!showZones) return null;
 
   return (
     <>
@@ -127,9 +132,21 @@ const ZoneLabelMarker: React.FC<ZoneLabelProps> = memo(
   ({ zone, coordinate, isSelected, isMoving }) => {
     const base = ZONE_COLORS[zone.type] ?? defaultZoneColor;
 
+    // Local drag state — zone labels are directly draggable (long-press to lift),
+    // in addition to the "Move Zone" menu action (isMoving).
+    const [dragging, setDragging] = useState(false);
+    const active = dragging || isMoving;
+    const tracksViewChanges = useTracksViewChanges([isSelected, zone.name], active);
+
+    const handleDragStart = useCallback(() => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      setDragging(true);
+    }, []);
+
     const handleDragEnd = useCallback(
       (e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
         const { latitude, longitude } = e.nativeEvent.coordinate;
+        setDragging(false);
         // For circle zones: move center. For polygon: shift all coords by delta.
         if (zone.shape_type === 'polygon' && zone.polygon_coords?.length) {
           const dLat = latitude - coordinate.latitude;
@@ -144,6 +161,7 @@ const ZoneLabelMarker: React.FC<ZoneLabelProps> = memo(
           useMapStore.getState().updateSavedPlaceInStore(zone.id, { latitude, longitude });
           updateSavedPlace(zone.id, { latitude, longitude }).catch(() => {});
         }
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         useMapStore.getState().setMovingZoneId(null);
       },
       [zone, coordinate],
@@ -153,28 +171,30 @@ const ZoneLabelMarker: React.FC<ZoneLabelProps> = memo(
       <Marker
         coordinate={coordinate}
         anchor={{ x: 0.5, y: 0.5 }}
-        tracksViewChanges={isSelected || isMoving}
-        draggable={isMoving}
-        onDragEnd={isMoving ? handleDragEnd : undefined}
-        zIndex={isMoving ? 999 : 11}
+        tracksViewChanges={tracksViewChanges}
+        draggable
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        zIndex={active ? 999 : isSelected ? 12 : 11}
         onPress={() => {
-          if (!isMoving) useMapStore.getState().setSelectedSavedPlaceId(zone.id);
+          if (!active) useMapStore.getState().setSelectedSavedPlaceId(zone.id);
         }}
       >
         <View style={[
           styles.badge,
-          { borderColor: base + (isSelected || isMoving ? 'cc' : '55') },
-          isSelected && !isMoving && { backgroundColor: base + '33' },
-          isMoving && { backgroundColor: 'rgba(34,197,94,0.85)', borderColor: '#fff' },
+          active && styles.badgeActive,
+          { borderColor: base + (isSelected || active ? 'cc' : '55') },
+          isSelected && !active && { backgroundColor: base + '33' },
+          active && { backgroundColor: 'rgba(34,197,94,0.9)', borderColor: '#fff' },
         ]}>
           <Text
             style={[
               styles.badgeText,
-              (isSelected || isMoving) && { color: '#ffffff' },
+              (isSelected || active) && { color: '#ffffff' },
             ]}
             numberOfLines={1}
           >
-            {isMoving ? '✥  Drop to place' : zone.name}
+            {active ? '✥  Drop to place' : zone.name}
           </Text>
         </View>
       </Marker>
@@ -200,6 +220,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#333',
     maxWidth: 180,
+  },
+  badgeActive: {
+    transform: [{ scale: 1.15 }],
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+    elevation: 10,
   },
   badgeText: {
     color: '#e8e8f0',

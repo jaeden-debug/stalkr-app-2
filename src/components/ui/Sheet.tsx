@@ -9,6 +9,8 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { C } from '@/constants/theme';
 
 interface SheetProps {
   visible: boolean;
@@ -78,6 +80,7 @@ export const Sheet: React.FC<SheetProps> = ({
             { transform: [{ translateY }] },
           ]}
         >
+          <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
           {showHandle && <View style={styles.handle} />}
           {title && (
             <View style={styles.header}>
@@ -104,17 +107,20 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
   sheet: {
-    backgroundColor: '#12121a',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: 'rgba(10,10,16,0.6)',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderTopWidth: 1,
-    borderColor: '#2a2a3a',
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: C.glassBorder,
+    overflow: 'hidden',
     paddingBottom: 34,
   },
   handle: {
     width: 40,
     height: 4,
-    backgroundColor: '#3a3a4e',
+    backgroundColor: 'rgba(255,255,255,0.4)',
     borderRadius: 2,
     alignSelf: 'center',
     marginTop: 10,
@@ -127,16 +133,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#2a2a3a',
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   title: {
-    color: '#e8e8f0',
-    fontSize: 17,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+    color: C.textPrimary,
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.8,
   },
   close: {
-    color: '#8888aa',
+    color: 'rgba(255,255,255,0.6)',
     fontSize: 16,
+    fontWeight: '700',
   },
 });

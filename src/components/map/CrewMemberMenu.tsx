@@ -4,19 +4,15 @@
 import React, { memo } from 'react';
 import { Clipboard, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Sheet } from '@/components/ui/Sheet';
-import { Avatar } from '@/components/ui/Avatar';
-import { Badge } from '@/components/ui/Badge';
 import { Toggle } from '@/components/ui/Toggle';
-import { BatteryIndicator } from '@/components/ui/BatteryIndicator';
+import { MemberCard } from './MemberCard';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useMapStore } from '@/store/useMapStore';
-import { useAuthStore } from '@/store/useAuthStore';
 import { useToast } from '@/components/ui/Toast';
-import { formatHeading, formatSpeed } from '@/utils/heading';
-import { formatDistance, getDistance } from '@/utils/distance';
-import { getLocationStatus, timeAgo } from '@/utils/time';
+import { getDistance } from '@/utils/distance';
+import { getLocationStatus } from '@/utils/time';
 import { getCrewColor } from '@/constants/map';
-import { FEATURES } from '@/config/features';
+import { callNumber, openSms } from '@/utils/contactActions';
 
 interface CrewMemberMenuProps {
   visible: boolean;
@@ -43,135 +39,83 @@ export const CrewMemberMenu: React.FC<CrewMemberMenuProps> = memo(({ visible, on
   const initials =
     member?.initials_override || member?.profile?.initials || displayName.slice(0, 2).toUpperCase();
 
-  const status = location ? getLocationStatus(location.last_ping_at) : 'offline';
-  const distance =
-    myLocation && location
-      ? getDistance({ latitude: myLocation.latitude, longitude: myLocation.longitude }, { latitude: location.latitude, longitude: location.longitude })
-      : null;
+  const explicitOffline = location?.status === 'offline' || location?.status === 'paused';
+  const status: 'live' | 'stale' | 'offline' = !location
+    ? 'offline'
+    : explicitOffline
+    ? 'offline'
+    : (getLocationStatus(location.last_ping_at) as 'live' | 'stale' | 'offline');
+  const isDark = status === 'offline';
+
+  const coords = location ? { latitude: location.latitude, longitude: location.longitude } : null;
+  const distance = myLocation && coords
+    ? getDistance({ latitude: myLocation.latitude, longitude: myLocation.longitude }, coords)
+    : null;
 
   const handleCopyCoords = () => {
-    if (!location) return;
-    const text = `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`;
-    Clipboard.setString(text);
+    if (!coords) return;
+    Clipboard.setString(`${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`);
     toast.success('Coordinates copied');
   };
 
-  const handleSetWaypoint = () => {
-    onClose();
-    startMarkerPlacement('waypoint');
-  };
+  const handleSetWaypoint = () => { onClose(); startMarkerPlacement('waypoint'); };
+  const handleGoTo = () => { if (coords) { useMapStore.getState().goTo(coords); onClose(); } };
 
   return (
-    <Sheet visible={visible} onClose={onClose} snapHeight={480}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.profileRow}>
-          <Avatar uri={member?.profile?.avatar_url} initials={initials} displayName={displayName} size={56} color={color} />
-          <View style={styles.profileInfo}>
-            <Text style={styles.name}>{displayName}</Text>
-            <View style={styles.badges}>
-              <Badge label={status === 'live' ? 'Live' : status === 'stale' ? 'Stale' : 'Offline'} variant={status} dot />
-              {distance !== null && <Badge label={formatDistance(distance)} variant="info" />}
-            </View>
-          </View>
-          {location?.battery_level != null && <BatteryIndicator level={location.battery_level} size="md" />}
-        </View>
-
-        {location && (
-          <View style={[styles.statusBar, status === 'live' ? styles.statusBarLive : styles.statusBarStale]}>
-            <View style={[styles.statusDot, status === 'live' ? styles.statusDotLive : styles.statusDotStale]} />
-            <Text style={[styles.statusBarText, status === 'live' ? styles.statusBarTextLive : styles.statusBarTextStale]}>
-              {status === 'live' ? 'LIVE LOCATION' : 'LAST KNOWN'}
-            </Text>
-          </View>
-        )}
-
-        {location ? (
-          <>
-            <TouchableOpacity style={styles.coordBox} onPress={handleCopyCoords} activeOpacity={0.7}>
-              <Text style={styles.coordLabel}>COORDINATES</Text>
-              <Text style={styles.coordText}>{location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}</Text>
-              <Text style={styles.coordHint}>Tap to copy</Text>
-            </TouchableOpacity>
-
-            <View style={styles.statsGrid}>
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Heading</Text>
-                <Text style={styles.statValue}>{formatHeading(location.heading)}</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Speed</Text>
-                <Text style={styles.statValue}>{formatSpeed(location.speed)}</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Accuracy</Text>
-                <Text style={styles.statValue}>±{Math.round(location.accuracy ?? 0)}m</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Last seen</Text>
-                <Text style={styles.statValue}>{timeAgo(location.last_ping_at)}</Text>
-              </View>
-            </View>
-          </>
-        ) : (
-          <View style={styles.noLocation}>
-            <Text style={styles.noLocationText}>Location unavailable</Text>
-          </View>
-        )}
-
-        <View style={styles.toggleGroup}>
-          <View style={[styles.toggleRow, styles.noBorder]}>
-            <Text style={styles.toggleLabel}>Breadcrumb Trail</Text>
-            <Toggle value={trailVisible} onValueChange={() => toggleTrail(userId)} />
-          </View>
-        </View>
-
-        {location && (
-          <View style={styles.actions}>
-            {FEATURES.EXPORT_COORDINATES && (
-              <TouchableOpacity style={styles.actionBtn} onPress={handleCopyCoords}>
-                <Text style={styles.actionBtnText}>📋  Copy Coordinates</Text>
+    <Sheet visible={visible} onClose={onClose} snapHeight={560}>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        <MemberCard
+          name={displayName}
+          avatarUri={member?.avatar_url_override || member?.profile?.avatar_url}
+          initials={initials}
+          color={color}
+          isSelf={false}
+          isDark={isDark}
+          status={status}
+          coords={coords}
+          heading={location?.heading}
+          speed={location?.speed}
+          battery={location?.battery_level ?? null}
+          accuracy={location?.accuracy}
+          lastUpdated={location?.last_ping_at}
+          distanceM={distance}
+          medical={member?.profile?.medical_share_with_crew
+            ? { bloodType: member?.profile?.blood_type, allergies: member?.profile?.allergies, medications: member?.profile?.medications, notes: member?.profile?.medical_notes }
+            : null}
+          onSetWaypoint={handleSetWaypoint}
+          onGoTo={handleGoTo}
+          onCopyCoords={handleCopyCoords}
+        >
+          {!!member?.profile?.phone && (
+            <View style={styles.contactRow}>
+              <TouchableOpacity style={styles.contactBtn} onPress={() => callNumber(member.profile!.phone!)} activeOpacity={0.8}>
+                <Text style={styles.contactBtnText}>📞  Call</Text>
               </TouchableOpacity>
-            )}
-            <TouchableOpacity style={styles.actionBtn} onPress={handleSetWaypoint}>
-              <Text style={styles.actionBtnText}>📍  Waypoint Here</Text>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.contactBtn} onPress={() => openSms([member.profile!.phone!], `Hey ${displayName} — `)} activeOpacity={0.8}>
+                <Text style={styles.contactBtnText}>💬  Text</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          <View style={styles.toggleGroup}>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>Breadcrumb Trail</Text>
+              <Toggle value={trailVisible} onValueChange={() => toggleTrail(userId)} />
+            </View>
           </View>
-        )}
+        </MemberCard>
       </ScrollView>
     </Sheet>
   );
 });
 
 const styles = StyleSheet.create({
-  content: { padding: 16, gap: 16 },
-  profileRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  profileInfo: { flex: 1, gap: 6 },
-  name: { color: '#e8e8f0', fontSize: 18, fontWeight: '700' },
-  badges: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  coordBox: { backgroundColor: '#0a0a0f', borderRadius: 10, padding: 14, borderWidth: 1, borderColor: '#2a2a3a' },
-  coordLabel: { color: '#8888aa', fontSize: 10, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
-  coordText: { color: '#22c55e', fontSize: 14, fontFamily: 'Courier New', fontWeight: '600' },
-  coordHint: { color: '#5555aa', fontSize: 10, marginTop: 4 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  statItem: { flex: 1, minWidth: '45%', backgroundColor: '#12121a', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#2a2a3a' },
-  statLabel: { color: '#8888aa', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.8 },
-  statValue: { color: '#e8e8f0', fontSize: 14, fontWeight: '600', marginTop: 2 },
-  statusBar: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1 },
-  statusBarLive: { backgroundColor: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.3)' },
-  statusBarStale: { backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)' },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  statusDotLive: { backgroundColor: '#22c55e' },
-  statusDotStale: { backgroundColor: '#ef4444' },
-  statusBarText: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
-  statusBarTextLive: { color: '#22c55e' },
-  statusBarTextStale: { color: '#ef4444' },
-  noLocation: { padding: 24, alignItems: 'center' },
-  noLocationText: { color: '#8888aa', fontSize: 14 },
-  toggleGroup: { backgroundColor: '#12121a', borderRadius: 10, borderWidth: 1, borderColor: '#2a2a3a' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, borderBottomWidth: 1, borderBottomColor: '#2a2a3a' },
-  noBorder: { borderBottomWidth: 0 },
+  toggleGroup: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14 },
   toggleLabel: { color: '#e8e8f0', fontSize: 15 },
-  actions: { gap: 10 },
-  actionBtn: { backgroundColor: '#1a1a24', borderRadius: 10, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: '#2a2a3a' },
-  actionBtnText: { color: '#e8e8f0', fontSize: 15, fontWeight: '600' },
+  contactRow: { flexDirection: 'row', gap: 10 },
+  contactBtn: {
+    flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 12,
+    backgroundColor: 'rgba(74,222,128,0.12)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)',
+  },
+  contactBtnText: { color: '#4ADE80', fontSize: 14, fontWeight: '800' },
 });

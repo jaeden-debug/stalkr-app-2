@@ -3,17 +3,19 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Circle, Marker } from 'react-native-maps';
 import { useSessionStore } from '@/store/useSessionStore';
 import { MAP_CONSTANTS } from '@/constants/map';
+import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
 
 export const DestinationMarker: React.FC = memo(() => {
   const activeSession = useSessionStore((s) => s.activeSession);
   const hasDestination =
     activeSession?.destination_latitude != null && activeSession?.destination_longitude != null;
 
-  if (!hasDestination) return null;
+  const lat = activeSession?.destination_latitude ?? 0;
+  const lng = activeSession?.destination_longitude ?? 0;
+  const name = activeSession?.destination_name ?? 'Destination';
+  const tracksViewChanges = useTracksViewChanges([lat, lng, name]);
 
-  const lat = activeSession!.destination_latitude!;
-  const lng = activeSession!.destination_longitude!;
-  const name = activeSession!.destination_name ?? 'Destination';
+  if (!hasDestination) return null;
 
   return (
     <>
@@ -27,7 +29,7 @@ export const DestinationMarker: React.FC = memo(() => {
       <Marker
         coordinate={{ latitude: lat, longitude: lng }}
         anchor={{ x: 0.5, y: 1 }}
-        tracksViewChanges={false}
+        tracksViewChanges={tracksViewChanges}
         zIndex={20}
       >
         <View style={styles.wrapper}>

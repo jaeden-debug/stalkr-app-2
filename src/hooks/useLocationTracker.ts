@@ -20,6 +20,7 @@ import { isInsidePolygon } from '@/utils/polygon';
 import { isQuietHours } from '@/utils/time';
 import { upsertPresence } from '@/services/savedPlaces';
 import { sendZoneNotification, sendPushNotification } from '@/services/notifications';
+import { logEvent } from '@/services/groupEvents';
 import * as Haptics from 'expo-haptics';
 import { getWatcherPushTokens } from '@/services/sessions';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -61,7 +62,8 @@ export function useLocationTracker() {
   const lastAccepted = useRef<{ lat: number; lng: number; acc: number; spd: number; t: number } | null>(null);
   const lastHeadingPoint = useRef<{ lat: number; lng: number } | null>(null);
   const lastStableHeading = useRef(0);
-  const lastLiveWrite = useRef<{ groupId: string; t: number } | null>(null);
+  const lastLiveWritePerGroup = useRef<Record<string, number>>({});
+  const offlineMarkedGroups = useRef<Set<string>>(new Set());
   const lastTrailWrite = useRef<{ lat: number; lng: number; t: number } | null>(null);
   const zonePresence = useRef<Record<string, boolean>>({});
   const zoneLastAlert = useRef<Record<string, number>>({});
@@ -105,6 +107,13 @@ export function useLocationTracker() {
             zoneEnteredAt.current[zone.id] = Date.now();
           }
           await upsertPresence(zone.id, groupId, userId, isInside);
+          logEvent(
+            groupId, userId,
+            isInside ? 'zone_entered' : 'zone_left',
+            `${isInside ? 'Entered' : 'Left'} ${zone.name}`,
+            undefined,
+            { zone_id: zone.id },
+          ).catch(() => {});
         }
 
         const now = Date.now();
@@ -204,11 +213,9 @@ export function useLocationTracker() {
           lastAccepted.current = { lat: latitude, lng: longitude, acc, spd, t: now };
 
           // Update map store
-          setMyLocation({ latitude, longitude, heading: resolvedHeading, accuracy: acc });
+          setMyLocation({ latitude, longitude, heading: resolvedHeading, accuracy: acc, speed: spd });
 
           const userId = useAuthStore.getState().session?.user?.id;
-          const groupId = useGroupStore.getState().activeGroupId;
-          const broadcasting = useLocationStore.getState().isBroadcasting;
           const approximate = useLocationStore.getState().isApproximate;
           const mode = useLocationStore.getState().sharingMode;
 
@@ -218,13 +225,35 @@ export function useLocationTracker() {
             setBatteryLevel(Math.round(level * 100));
           } catch {}
 
-          if (userId && groupId && broadcasting) {
+          // ── Broadcast to EVERY crew the user is live in ─────────────────────
+          // Per-group broadcasting state lives in groupBroadcastingStatus
+          // (undefined → live by default). Going dark in one crew leaves the
+          // others untouched.
+          if (userId) {
+            const groups = useGroupStore.getState().groups;
+            const statusMap = useLocationStore.getState().groupBroadcastingStatus;
             const throttleMs = 8000;
-            if (!lastLiveWrite.current || now - lastLiveWrite.current.t > throttleMs || lastLiveWrite.current.groupId !== groupId) {
-              lastLiveWrite.current = { groupId, t: now };
-              setLastBroadcastAt(new Date().toISOString());
+            let wroteAny = false;
+
+            for (const g of groups) {
+              const liveForGroup = statusMap[g.id] !== false; // default true
+              if (!liveForGroup) {
+                // Mark offline once when a crew is dark (keeps last known position).
+                if (!offlineMarkedGroups.current.has(g.id)) {
+                  offlineMarkedGroups.current.add(g.id);
+                  setLocationOffline(g.id, userId).catch(() => {});
+                }
+                continue;
+              }
+              offlineMarkedGroups.current.delete(g.id);
+
+              const last = lastLiveWritePerGroup.current[g.id] ?? 0;
+              if (now - last <= throttleMs) continue;
+              lastLiveWritePerGroup.current[g.id] = now;
+              wroteAny = true;
+
               await upsertLiveLocation({
-                groupId,
+                groupId: g.id,
                 userId,
                 latitude,
                 longitude,
@@ -238,9 +267,14 @@ export function useLocationTracker() {
                 approximateLatitude: approximate ? Math.round(latitude * 100) / 100 : undefined,
                 approximateLongitude: approximate ? Math.round(longitude * 100) / 100 : undefined,
               });
+            }
 
-              // Zone checks
-              await checkZones(latitude, longitude, userId, groupId);
+            if (wroteAny) setLastBroadcastAt(new Date().toISOString());
+
+            // Zone checks run against the active crew's zones (local awareness).
+            const activeGid = useGroupStore.getState().activeGroupId;
+            if (activeGid && statusMap[activeGid] !== false) {
+              await checkZones(latitude, longitude, userId, activeGid);
             }
           }
 
@@ -293,6 +327,16 @@ export function useLocationTracker() {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 // Mark arrived in DB + store
                 await useSessionStore.getState().markArrived(journeySession.id);
+                // Dedicated arrival activity event (streams to crew feed).
+                if (journeySession.group_id) {
+                  logEvent(
+                    journeySession.group_id,
+                    userId,
+                    'arrival',
+                    `Arrived: ${journeySession.destination_name ?? journeySession.name}`,
+                    `${journeySession.traveler_name ?? 'A crew member'} reached their destination safely.`,
+                  ).catch(() => {});
+                }
                 // Broadcast arrival on Realtime channel for web viewer
                 const channel = supabase.channel(`session:${journeySession.watch_token}`);
                 await channel.subscribe();

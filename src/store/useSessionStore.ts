@@ -12,6 +12,16 @@ interface SessionStoreState {
   isLoading: boolean;
   error: string | null;
 
+  /** Transient hand-off used to pre-fill the New Journey sheet (e.g. from map search). */
+  journeyDraft: {
+    name: string;
+    destinationName: string;
+    destinationLat?: number;
+    destinationLng?: number;
+  } | null;
+  setJourneyDraft: (d: SessionStoreState['journeyDraft']) => void;
+  clearJourneyDraft: () => void;
+
   loadGroupSessions: (groupId: string) => Promise<void>;
   loadMyJourneySession: () => Promise<void>;
   createSession: (options: {
@@ -38,6 +48,10 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
   activeJourneySession: null,
   isLoading: false,
   error: null,
+  journeyDraft: null,
+
+  setJourneyDraft: (d) => set({ journeyDraft: d }),
+  clearJourneyDraft: () => set({ journeyDraft: null }),
 
   loadGroupSessions: async (groupId) => {
     set({ isLoading: true, error: null });

@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useBillingStore } from '@/store/useBillingStore';
+import { useGroupStore } from '@/store/useGroupStore';
 import { Avatar } from '@/components/ui/Avatar';
 import { NotificationPrefsSheet } from '@/components/ui/NotificationPrefsSheet';
 import { C } from '@/constants/theme';
@@ -38,8 +39,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { profile, user, signOut } = useAuthStore();
+  const { profile, user, signOut, deleteAccount } = useAuthStore();
   const { plan } = useBillingStore();
+  const groups = useGroupStore((s) => s.groups);
+  const activeGroupId = useGroupStore((s) => s.activeGroupId);
+  const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null;
   const [notifSheet, setNotifSheet] = useState(false);
 
   const planColor = plan === 'free' ? 'rgba(255,255,255,0.3)' : C.green;
@@ -52,10 +56,50 @@ export default function SettingsScreen() {
     ]);
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This permanently deletes your account, profile, crews you own, journeys, and all associated data. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            // Second confirmation — irreversible action.
+            Alert.alert('Are you absolutely sure?', 'Your account will be erased immediately.', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete Forever',
+                style: 'destructive',
+                onPress: async () => {
+                  const ok = await deleteAccount();
+                  if (!ok) Alert.alert('Delete failed', 'Could not delete your account. Please try again or contact support.');
+                },
+              },
+            ]);
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <SafeAreaView style={s.root}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-        <Text style={s.title}>SETTINGS</Text>
+        <View style={s.header}>
+          <Text style={s.title}>SETTINGS</Text>
+          <TouchableOpacity
+            style={s.exitBtn}
+            onPress={() => router.navigate('/(tabs)/map')}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Close settings"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close" size={20} color={C.textPrimary} />
+          </TouchableOpacity>
+        </View>
 
         {/* Profile card */}
         <TouchableOpacity style={s.profileCard} onPress={() => router.push('/profile')} activeOpacity={0.85}>
@@ -72,7 +116,21 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         <Section title="NOTIFICATIONS">
-          <Row icon="notifications" label="NOTIFICATION PREFERENCES" sub="Zone alerts, SOS, crew activity" onPress={() => setNotifSheet(true)} />
+          <Row icon="notifications" label="NOTIFICATION PREFERENCES" sub="Global defaults — zones, SOS, crew activity" onPress={() => setNotifSheet(true)} />
+        </Section>
+
+        <Section title="CREW">
+          <Row
+            icon="people"
+            label="CREW SETTINGS"
+            sub={activeGroup ? `${activeGroup.name} — call sign, alerts, members` : 'No active crew selected'}
+            onPress={() => {
+              if (!activeGroupId) return;
+              router.push(`/groups/${activeGroupId}`);
+            }}
+          />
+          <View style={s.sep} />
+          <Row icon="pulse" label="ACTIVITY FEED" sub="Crew movements, check-ins, journeys, SOS" onPress={() => router.push('/activity')} />
         </Section>
 
         <Section title="ACCOUNT">
@@ -90,8 +148,18 @@ export default function SettingsScreen() {
           />
         </Section>
 
+        <Section title="SUPPORT & LEGAL">
+          <Row icon="help-buoy" label="HELP & SUPPORT" onPress={() => Linking.openURL('https://stalkr.app/support')} />
+          <View style={s.sep} />
+          <Row icon="document-text" label="TERMS OF SERVICE" onPress={() => Linking.openURL('https://stalkr.app/terms')} />
+          <View style={s.sep} />
+          <Row icon="shield-checkmark" label="PRIVACY POLICY" onPress={() => Linking.openURL('https://stalkr.app/privacy')} />
+        </Section>
+
         <Section title="DANGER ZONE">
           <Row icon="log-out" label="SIGN OUT" onPress={handleSignOut} danger />
+          <View style={s.sep} />
+          <Row icon="trash" label="DELETE ACCOUNT" sub="Permanently erase your account & data" onPress={handleDeleteAccount} danger />
         </Section>
 
         <Text style={s.version}>STALKR · v2.0.0</Text>
@@ -104,7 +172,16 @@ export default function SettingsScreen() {
 
 const s = StyleSheet.create({
   root:  { flex: 1, backgroundColor: C.bg },
-  title: { color: C.textPrimary, fontSize: 22, fontWeight: '900', letterSpacing: 1.5, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20,
+  },
+  title: { color: C.textPrimary, fontSize: 22, fontWeight: '900', letterSpacing: 1.5 },
+  exitBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: C.surface, borderWidth: 1, borderColor: C.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
 
   profileCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,

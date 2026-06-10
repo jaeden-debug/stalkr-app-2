@@ -11,6 +11,7 @@ import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useToast } from '@/components/ui/Toast';
 import { deleteSavedPlace, updateSavedPlace } from '@/services/savedPlaces';
+import { logEvent } from '@/services/groupEvents';
 import { timeAgo } from '@/utils/time';
 
 interface ZoneDetailSheetProps {
@@ -109,6 +110,9 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          if (userId && zone.group_id) {
+            logEvent(zone.group_id, userId, 'zone_deleted', `Zone removed: ${zone.name}`, undefined).catch(() => {});
+          }
           await deleteSavedPlace(zone.id);
           removeSavedPlaceFromStore(zone.id);
           onClose();

@@ -12,6 +12,7 @@ import { useGroupStore } from '@/store/useGroupStore';
 import type { MapCrewMember } from '@/types/models';
 import { getCrewColor } from '@/constants/map';
 import { getLocationStatus } from '@/utils/time';
+import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
 import { HeadingArrow } from './HeadingArrow';
 
 interface CrewMarkerProps {
@@ -32,10 +33,22 @@ export const CrewMarker: React.FC<CrewMarkerProps> = memo(
       member?.profile?.initials ||
       displayName.slice(0, 2).toUpperCase();
     const color = getCrewColor(location.user_id);
-    const status = getLocationStatus(location.last_ping_at);
+    // A crew member who has gone dark is flagged offline/paused on their row —
+    // grey them out immediately at their last known position rather than waiting
+    // for the last ping to age out.
+    const explicitOffline = location.status === 'offline' || location.status === 'paused';
+    const status = explicitOffline ? 'offline' : getLocationStatus(location.last_ping_at);
 
     const statusColor =
       status === 'live' ? '#22c55e' : status === 'stale' ? '#f59e0b' : '#6b7280';
+
+    const tracksViewChanges = useTracksViewChanges([
+      location.latitude,
+      location.longitude,
+      location.heading,
+      status,
+      initials,
+    ]);
 
     const handlePress = () => {
       useMapStore.getState().setSelectedMapUser({ userId: location.user_id, type: 'crew' });
@@ -45,7 +58,7 @@ export const CrewMarker: React.FC<CrewMarkerProps> = memo(
       <Marker
         coordinate={{ latitude: location.latitude, longitude: location.longitude }}
         anchor={{ x: 0.5, y: 0.5 }}
-        tracksViewChanges={false}
+        tracksViewChanges={tracksViewChanges}
         onPress={handlePress}
         zIndex={50}
       >

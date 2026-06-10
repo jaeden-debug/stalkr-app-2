@@ -35,15 +35,17 @@ import { track } from '@/services/analytics';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PRODUCTION_ORIGIN = 'https://stalkr.app';
-const APP_STORE_URL =
-  'https://apps.apple.com/app/stalkr/id0000000000'; // replace with real App Store ID
-const TESTFLIGHT_URL =
-  'https://testflight.apple.com/join/XXXXXXXXXX'; // replace with real TestFlight link
-const OG_IMAGE_URL = `${PRODUCTION_ORIGIN}/assets/og-invite-image.jpg`;
+// Set EXPO_PUBLIC_APP_STORE_ID + EXPO_PUBLIC_TESTFLIGHT_CODE once the app is live
+// in App Store Connect. Falls back to placeholders for preview builds.
+const APP_STORE_ID = process.env.EXPO_PUBLIC_APP_STORE_ID || '0000000000';
+const TESTFLIGHT_CODE = process.env.EXPO_PUBLIC_TESTFLIGHT_CODE || 'XXXXXXXXXX';
+const APP_STORE_URL = `https://apps.apple.com/app/stalkr/id${APP_STORE_ID}`;
+const TESTFLIGHT_URL = `https://testflight.apple.com/join/${TESTFLIGHT_CODE}`;
+const OG_IMAGE_URL = `${PRODUCTION_ORIGIN}/stalkr-crew-invite-og-image.png`;
 
-const META_TITLE = "You're invited to join a Stalkr crew — Know Where Your People Are.";
+const META_TITLE = 'Join Our Crew';
 const META_DESCRIPTION =
-  'Track. Share. Stay Safe. Join this Stalkr crew for real-time location awareness, live GPS tracking, safety zones, and crew coordination.';
+  'Track locations, stay connected, and explore safely together.';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -165,7 +167,7 @@ export default function InviteWebPage() {
         <meta property="og:title" content={pageTitle} />
         <meta property="og:description" content={pageDescription} />
         <meta property="og:image"        content={OG_IMAGE_URL} />
-        <meta property="og:image:type"   content="image/jpeg" />
+        <meta property="og:image:type"   content="image/png" />
         <meta property="og:image:width"  content="1200" />
         <meta property="og:image:height" content="630" />
         <meta property="og:image:alt"    content="Stalkr — real-time crew location sharing" />
@@ -183,7 +185,7 @@ export default function InviteWebPage() {
         {/* Replace app-id with real App Store numeric ID */}
         <meta
           name="apple-itunes-app"
-          content={`app-id=0000000000, app-argument=${deepLink}`}
+          content={`app-id=${APP_STORE_ID}, app-argument=${deepLink}`}
         />
 
         {/* Theme */}

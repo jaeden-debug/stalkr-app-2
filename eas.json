@@ -38,6 +38,10 @@
       "ios": {
         "appleId": "subscriptions@stillawakemedia.com",
         "appleTeamId": "632569QA3T"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "internal"
       }
     }
   }

@@ -2,11 +2,17 @@ import React, { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Circle, Marker } from 'react-native-maps';
 import { useMapStore } from '@/store/useMapStore';
+import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
 import { FEATURES } from '@/config/features';
 
 export const RallyPointMarker: React.FC = memo(() => {
   if (!FEATURES.RALLY_POINTS) return null;
   const rallyPoint = useMapStore((s) => s.activeRallyPoint);
+  const tracksViewChanges = useTracksViewChanges([
+    rallyPoint?.latitude ?? 0,
+    rallyPoint?.longitude ?? 0,
+    rallyPoint?.name ?? '',
+  ]);
   if (!rallyPoint) return null;
 
   return (
@@ -21,7 +27,7 @@ export const RallyPointMarker: React.FC = memo(() => {
       <Marker
         coordinate={{ latitude: rallyPoint.latitude, longitude: rallyPoint.longitude }}
         anchor={{ x: 0.5, y: 1 }}
-        tracksViewChanges={false}
+        tracksViewChanges={tracksViewChanges}
         zIndex={25}
       >
         <View style={styles.wrapper}>

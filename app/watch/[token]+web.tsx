@@ -10,7 +10,7 @@ import { supabase } from '@/services/supabase';
 import { addEmailWatcher } from '@/services/sessions';
 
 const ORIGIN = 'https://stalkr.app';
-const OG_IMAGE = `${ORIGIN}/assets/og-image.jpg`;
+const OG_IMAGE = `${ORIGIN}/stalkr-crew-invite-og-image-new.png`;
 
 // ─── Google Maps global (loaded dynamically) ─────────────────────────────────
 declare const google: any; // eslint-disable-line no-var
@@ -225,12 +225,13 @@ export default function WatchPage() {
 
   const traveler = session.traveler_name ?? 'Someone';
   const dest     = session.destination_name;
+  // Dynamic social preview — reflects the live traveler + destination.
   const pageTitle = dest
-    ? `${traveler} is heading to ${dest} — Stalkr`
-    : `${traveler}'s live journey — Stalkr`;
+    ? `${traveler} is traveling to ${dest} · Follow on Stalkr`
+    : `Follow ${traveler}'s Journey on Stalkr`;
   const pageDesc = dest
-    ? `Follow ${traveler}'s live location on their way to ${dest}. Get notified when they arrive safely.`
-    : `Follow ${traveler}'s live location in real time. Get notified when they arrive safely.`;
+    ? `Track ${traveler}'s progress to ${dest} in real time and get notified when they arrive safely.`
+    : `Track ${traveler}'s progress in real time and get notified when they arrive safely.`;
 
   return (
     <div style={styles.page}>
@@ -245,7 +246,7 @@ export default function WatchPage() {
         <meta property="og:title"        content={pageTitle} />
         <meta property="og:description"  content={pageDesc} />
         <meta property="og:image"        content={OG_IMAGE} />
-        <meta property="og:image:type"   content="image/jpeg" />
+        <meta property="og:image:type"   content="image/png" />
         <meta property="og:image:width"  content="1200" />
         <meta property="og:image:height" content="630" />
         <meta property="og:site_name"    content="Stalkr" />

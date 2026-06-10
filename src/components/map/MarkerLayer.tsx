@@ -3,16 +3,19 @@
  * Memoized per marker ID + selection state. Never rerenders on GPS ticks.
  * Supports drag-to-move when draggingMarkerId matches.
  */
-import React, { memo, useCallback, useEffect, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { Marker } from 'react-native-maps';
+import * as Haptics from 'expo-haptics';
 import { useMapStore } from '@/store/useMapStore';
 import { updateMarker } from '@/services/markers';
 import { getMarkerConfig } from '@/constants/markerTypes';
-import type { Marker as MarkerModel } from '@/types/models';
+import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
 
 export const MarkerLayer: React.FC = memo(() => {
-  const markerIds = useMapStore((s) => s.markers.map((m) => m.id));
+  const markerIds = useMapStore((s) =>
+    s.markers.filter((m) => !s.hiddenMarkerTypes.includes(m.type)).map((m) => m.id),
+  );
   return (
     <>
       {markerIds.map((id) => (
@@ -25,7 +28,15 @@ export const MarkerLayer: React.FC = memo(() => {
 const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) => {
   const marker = useMapStore((s) => s.markers.find((m) => m.id === markerId));
   const isSelected = useMapStore((s) => s.selectedFieldMarkerId === markerId);
-  const isDragging = useMapStore((s) => s.draggingMarkerId === markerId);
+  const menuMove = useMapStore((s) => s.draggingMarkerId === markerId);
+
+  // Local drag state — drives the enlarge / "drop to place" affordance.
+  const [dragging, setDragging] = useState(false);
+  const isDragging = dragging || menuMove;
+
+  // Keep the snapshot fresh while selected/dragging or just after mount, then
+  // settle to a static (cheap) marker. Fixes blank / un-tappable pins.
+  const tracksViewChanges = useTracksViewChanges([isSelected], isDragging);
 
   // Drop-bounce animation on mount
   const dropAnim = useRef(new Animated.Value(0)).current;
@@ -39,11 +50,18 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
   }, []);
   const scaleY = dropAnim.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0.3, 1.12, 1] });
 
+  const handleDragStart = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setDragging(true);
+  }, []);
+
   const handleDragEnd = useCallback(
     (e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
       const { latitude, longitude } = e.nativeEvent.coordinate;
+      setDragging(false);
       useMapStore.getState().updateMarkerInStore(markerId, { latitude, longitude });
       useMapStore.getState().setDraggingMarkerId(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       updateMarker(markerId, { latitude, longitude } as any).catch(() => {});
     },
     [markerId],
@@ -59,9 +77,10 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
     <Marker
       coordinate={{ latitude, longitude }}
       anchor={{ x: 0.5, y: 1 }}
-      tracksViewChanges={isSelected || isDragging}
-      draggable={isDragging}
-      onDragEnd={isDragging ? handleDragEnd : undefined}
+      tracksViewChanges={tracksViewChanges}
+      draggable
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
       onPress={() => {
         if (!isDragging) useMapStore.getState().setSelectedFieldMarkerId(markerId);
       }}

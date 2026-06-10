@@ -3,8 +3,8 @@
     "apps": [],
     "details": [
       {
-        "appID": "TEAMID.com.stalkr.app",
-        "paths": ["/invite/*"]
+        "appID": "632569QA3T.com.stalkr.app",
+        "paths": ["/invite/*", "/watch/*"]
       }
     ]
   }

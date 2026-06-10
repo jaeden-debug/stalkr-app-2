@@ -9,6 +9,8 @@ import { useGroupStore } from '@/store/useGroupStore';
 import { useMapStore } from '@/store/useMapStore';
 import { logEvent } from '@/services/groupEvents';
 import { sendSOSNotification, sendSOSCancelNotification, sendLocalNotification } from '@/services/notifications';
+import { fetchEmergencyContacts } from '@/services/emergencyContacts';
+import { openSms, mapsLink } from '@/utils/contactActions';
 import { supabase } from '@/services/supabase';
 import { FEATURES } from '@/config/features';
 import { track } from '@/services/analytics';
@@ -54,6 +56,24 @@ export function useSOSMode() {
     if (tokens.length > 0 && coords) {
       await sendSOSNotification(tokens, userName, coords, userIds);
     }
+
+    // Text emergency contacts a pre-filled SOS message with a location link.
+    try {
+      const contacts = await fetchEmergencyContacts(userId);
+      if (contacts.length > 0) {
+        const loc = coords ? ` My location: ${mapsLink(coords.latitude, coords.longitude)}` : '';
+        const med = [
+          profile?.blood_type ? `Blood ${profile.blood_type}` : '',
+          profile?.allergies ? `Allergies: ${profile.allergies}` : '',
+          profile?.medications ? `Meds: ${profile.medications}` : '',
+        ].filter(Boolean).join('; ');
+        const medLine = med ? `\nMedical — ${med}` : '';
+        await openSms(
+          contacts.map((c) => c.phone_number),
+          `🆘 SOS from ${userName}. I need help.${loc}${medLine}`,
+        );
+      }
+    } catch {}
 
     // Local confirmation
     await sendLocalNotification(

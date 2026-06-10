@@ -1,6 +1,8 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { MapContainer } from '@/components/map/MapContainer';
+import { SearchOverlay } from '@/components/map/SearchOverlay';
+import { PlaceCard } from '@/components/map/PlaceCard';
 import { SelfMarkerMenu } from '@/components/map/SelfMarkerMenu';
 import { CrewMemberMenu } from '@/components/map/CrewMemberMenu';
 import { CheckInBadge } from '@/components/map/CheckInBadge';
@@ -10,6 +12,9 @@ import { TacticalHud } from '@/components/ui/TacticalHud';
 import { SOSButton } from '@/components/ui/SOSButton';
 import { NavigationDrawer } from '@/components/ui/NavigationDrawer';
 import { ZoneCreationSheet } from '@/components/zones/ZoneCreationSheet';
+import { SafetyCenter } from '@/components/safety/SafetyCenter';
+import { MeasurePanel } from '@/components/map/MeasurePanel';
+import { FilterSheet } from '@/components/map/FilterSheet';
 import { useMapStore } from '@/store/useMapStore';
 import { useLocationTracker } from '@/hooks/useLocationTracker';
 import { useRealtimeGroup } from '@/hooks/useRealtimeGroup';
@@ -40,6 +45,11 @@ export default function MapScreen() {
       <CheckInBadge />
       <NavigationDrawer />
       <ZoneCreationSheet />
+      <SafetyCenter />
+      <MeasurePanel />
+      <FilterSheet />
+      <PlaceCard />
+      <SearchOverlay />
 
       <SelfMarkerMenu
         visible={selectedMapUser?.type === 'self'}

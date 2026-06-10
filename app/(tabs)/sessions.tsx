@@ -26,6 +26,8 @@ import {
   View,
   ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -36,8 +38,10 @@ import { Avatar } from '@/components/ui/Avatar';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { buildWatchUrl } from '@/services/sessions';
+import { fetchEmergencyContacts } from '@/services/emergencyContacts';
+import { openSms } from '@/utils/contactActions';
 import { getCrewColor } from '@/constants/map';
-import type { Session } from '@/types/models';
+import type { Session, EmergencyContact } from '@/types/models';
 
 function timeAgo(iso: string | null): string {
   if (!iso) return '—';
@@ -52,19 +56,34 @@ function timeAgo(iso: string | null): string {
 
 export default function SessionsScreen() {
   const toast = useToast();
+  const router = useRouter();
   const {
     sessions, isLoading, activeJourneySession,
     loadGroupSessions, loadMyJourneySession,
     createSession, endSession, markArrived, joinSessionByCode,
+    journeyDraft, clearJourneyDraft,
   } = useSessionStore();
   const { activeGroup, groupMembers } = useGroupStore();
   const userId = useAuthStore((s) => s.user?.id);
   const profile = useAuthStore((s) => s.profile);
+  const [emContacts, setEmContacts] = useState<EmergencyContact[]>([]);
+
+  useEffect(() => {
+    if (userId) fetchEmergencyContacts(userId).then(setEmContacts).catch(() => {});
+  }, [userId]);
+
+  const textContactsLink = (session: Session) => {
+    if (emContacts.length === 0) { toast.info('Add emergency contacts in Settings first'); return; }
+    const url = buildWatchUrl(session.watch_token);
+    const dest = session.destination_name ? ` to ${session.destination_name}` : '';
+    openSms(emContacts.map((c) => c.phone_number), `Follow my journey${dest}: ${url}`);
+  };
 
   // Create sheet state
   const [showCreate, setShowCreate] = useState(false);
   const [sessionName, setSessionName] = useState('');
   const [destination, setDestination] = useState('');
+  const [destCoords, setDestCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedWatchers, setSelectedWatchers] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
 
@@ -77,6 +96,21 @@ export default function SessionsScreen() {
     if (activeGroup?.id) loadGroupSessions(activeGroup.id);
     loadMyJourneySession();
   }, [activeGroup?.id]);
+
+  // Pre-fill + open the create sheet when arriving from a map-search place.
+  useEffect(() => {
+    if (journeyDraft) {
+      setSessionName(journeyDraft.name);
+      setDestination(journeyDraft.destinationName);
+      setDestCoords(
+        journeyDraft.destinationLat != null && journeyDraft.destinationLng != null
+          ? { lat: journeyDraft.destinationLat, lng: journeyDraft.destinationLng }
+          : null,
+      );
+      setShowCreate(true);
+      clearJourneyDraft();
+    }
+  }, [journeyDraft]);
 
   const otherMembers = groupMembers.filter((m) => m.user_id !== userId);
 
@@ -100,6 +134,8 @@ export default function SessionsScreen() {
       name: sessionName.trim(),
       groupId: activeGroup?.id ?? null,
       destinationName: destination.trim() || undefined,
+      destinationLat: destCoords?.lat,
+      destinationLng: destCoords?.lng,
       notifyOnEnd: true,
       watchers,
     });
@@ -111,6 +147,7 @@ export default function SessionsScreen() {
     setShowCreate(false);
     setSessionName('');
     setDestination('');
+    setDestCoords(null);
     setSelectedWatchers(new Set());
 
     // Auto-open share sheet
@@ -164,6 +201,7 @@ export default function SessionsScreen() {
     setShowCreate(false);
     setSessionName('');
     setDestination('');
+    setDestCoords(null);
     setSelectedWatchers(new Set());
   };
 
@@ -202,7 +240,13 @@ export default function SessionsScreen() {
               style={styles.shareBtn}
               onPress={() => handleShareLink(item)}
             >
-              <Text style={styles.shareBtnText}>🔗  Share Link</Text>
+              <Text style={styles.shareBtnText}>🔗  Share</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.shareBtn}
+              onPress={() => textContactsLink(item)}
+            >
+              <Text style={styles.shareBtnText}>💬  Text Contacts</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.arrivedBtn}
@@ -233,7 +277,18 @@ export default function SessionsScreen() {
     <SafeAreaView style={styles.root}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>JOURNEYS</Text>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity
+            style={styles.exitBtn}
+            onPress={() => router.navigate('/(tabs)/map')}
+            activeOpacity={0.8}
+            accessibilityLabel="Close journeys"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close" size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text style={styles.title}>JOURNEYS</Text>
+        </View>
         <View style={styles.headerBtns}>
           <TouchableOpacity style={styles.joinBtn} onPress={() => setShowJoin(true)}>
             <Text style={styles.joinBtnText}>Join</Text>
@@ -406,6 +461,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)',
   },
   title: { color: '#FFFFFF', fontSize: 22, fontWeight: '900', letterSpacing: 1.5 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  exitBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center', justifyContent: 'center',
+  },
   headerBtns: { flexDirection: 'row', gap: 8 },
   joinBtn: {
     backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',

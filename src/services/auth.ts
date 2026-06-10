@@ -32,6 +32,14 @@ export async function signOut(): Promise<void> {
   await supabase.auth.signOut();
 }
 
+/** Permanently delete the signed-in user's account (App Store requirement). */
+export async function deleteAccount(): Promise<AuthResult> {
+  const { error } = await supabase.rpc('delete_account');
+  if (error) return { success: false, error: error.message };
+  await supabase.auth.signOut().catch(() => {});
+  return { success: true };
+}
+
 export async function getSession() {
   const { data } = await supabase.auth.getSession();
   return data.session;
@@ -49,7 +57,9 @@ export async function getProfile(userId: string): Promise<Profile | null> {
 
 export async function updateProfile(
   userId: string,
-  updates: Partial<Pick<Profile, 'display_name' | 'nickname' | 'initials' | 'avatar_url' | 'phone' | 'default_sharing_mode'>>,
+  updates: Partial<Pick<Profile,
+    'display_name' | 'nickname' | 'initials' | 'avatar_url' | 'phone' | 'default_sharing_mode'
+    | 'blood_type' | 'allergies' | 'medications' | 'medical_notes' | 'medical_share_with_crew'>>,
 ): Promise<AuthResult> {
   const { error } = await supabase
     .from('profiles')

@@ -11,11 +11,12 @@ import { useAuthStore } from '@/store/useAuthStore';
 export const TrailLayer: React.FC = memo(() => {
   const userTrails = useMapStore((s) => s.userTrails);
   const visibleTrailUsers = useMapStore((s) => s.visibleTrailUsers);
+  const showTrails = useMapStore((s) => s.showTrails);
   const myUserId = useAuthStore((s) => s.user?.id);
 
-  const visibleEntries = Object.entries(userTrails).filter(
-    ([userId]) => visibleTrailUsers[userId],
-  );
+  const visibleEntries = showTrails
+    ? Object.entries(userTrails).filter(([userId]) => visibleTrailUsers[userId])
+    : [];
 
   return (
     <>

@@ -7,6 +7,7 @@ export async function createCheckInTimer(
   notifyUserIds: string[],
   groupId?: string | null,
   label?: string | null,
+  mode: 'checkin' | 'deadman' = 'checkin',
 ): Promise<CheckInTimer | null> {
   const checkInAt = new Date(Date.now() + minutesFromNow * 60_000).toISOString();
   const { data, error } = await supabase
@@ -18,11 +19,18 @@ export async function createCheckInTimer(
       check_in_at: checkInAt,
       is_resolved: false,
       notify_user_ids: notifyUserIds,
+      mode,
+      interval_minutes: minutesFromNow,
     })
     .select()
     .single();
   if (error || !data) return null;
   return data as CheckInTimer;
+}
+
+/** Clear any prior unresolved timers for a user (one active safety timer at a time). */
+export async function clearActiveTimers(userId: string): Promise<void> {
+  await supabase.from('check_in_timers').delete().eq('user_id', userId).eq('is_resolved', false);
 }
 
 export async function resolveCheckInTimer(timerId: string): Promise<boolean> {

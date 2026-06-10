@@ -4,10 +4,10 @@
  * Tapping opens the SelfMarkerMenu.
  */
 import React, { memo } from 'react';
-import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Marker } from 'react-native-maps';
 import { useMapStore } from '@/store/useMapStore';
-import { useAuthStore } from '@/store/useAuthStore';
+import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
 import { HeadingArrow } from './HeadingArrow';
 
 interface SelfMarkerProps {
@@ -19,8 +19,9 @@ interface SelfMarkerProps {
 
 export const SelfMarker: React.FC<SelfMarkerProps> = memo(
   ({ userId, latitude, longitude, heading }) => {
-    const profile = useAuthStore((s) => s.profile);
-    const initials = profile?.initials || profile?.display_name?.slice(0, 2).toUpperCase() || 'ME';
+    // Re-snapshot briefly on mount and whenever position/heading meaningfully
+    // change, then settle static — prevents the marker rendering blank/invisible.
+    const tracksViewChanges = useTracksViewChanges([latitude, longitude, heading]);
 
     const handlePress = () => {
       useMapStore.getState().setSelectedMapUser({ userId, type: 'self' });
@@ -30,7 +31,7 @@ export const SelfMarker: React.FC<SelfMarkerProps> = memo(
       <Marker
         coordinate={{ latitude, longitude }}
         anchor={{ x: 0.5, y: 0.5 }}
-        tracksViewChanges={false}
+        tracksViewChanges={tracksViewChanges}
         onPress={handlePress}
         zIndex={100}
       >
