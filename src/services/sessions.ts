@@ -159,6 +159,22 @@ export async function addMemberWatcher(
   );
 }
 
+/** Add any watcher (member, phone, email, or manual) to a journey. */
+export async function addWatcher(
+  sessionId: string,
+  w: { userId?: string | null; name?: string | null; phone?: string | null; email?: string | null; pushToken?: string | null; inviteSent?: boolean },
+): Promise<void> {
+  await supabase.from('session_watchers').insert({
+    session_id: sessionId,
+    user_id: w.userId ?? null,
+    name: w.name ?? null,
+    phone: w.phone ?? null,
+    email: w.email ?? null,
+    push_token: w.pushToken ?? null,
+    invite_sent: w.inviteSent ?? false,
+  } as any);
+}
+
 /** Add a non-member watcher by email (called from watch page via RPC). */
 export async function addEmailWatcher(sessionId: string, email: string): Promise<void> {
   await supabase.rpc('add_session_email_watcher', {

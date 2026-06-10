@@ -440,6 +440,14 @@ export type GroupEventType =
   | 'arrival'
   | 'member_offline'
   | 'member_online'
+  | 'journey_started'
+  | 'journey_invite_sent'
+  | 'journey_watcher_added'
+  | 'journey_arrived'
+  | 'journey_completed'
+  | 'journey_cancelled'
+  | 'journey_failed_to_notify'
+  | 'journey_viewed'
   | 'low_signal_alert';
 
 export interface DbGroupEvent {

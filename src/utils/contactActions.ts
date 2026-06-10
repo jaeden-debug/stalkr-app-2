@@ -33,3 +33,15 @@ export async function openSms(numbers: string[], body: string): Promise<boolean>
 export function mapsLink(lat: number, lng: number): string {
   return `https://maps.google.com/?q=${lat},${lng}`;
 }
+
+export async function openEmail(emails: string[], subject: string, body: string): Promise<boolean> {
+  const to = emails.map((e) => e.trim()).filter(Boolean).join(',');
+  if (!to) return false;
+  const url = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  try {
+    await Linking.openURL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}

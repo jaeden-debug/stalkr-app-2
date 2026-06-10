@@ -2,8 +2,37 @@ import { create } from 'zustand';
 import type { Session, SessionWatcher } from '@/types/models';
 import * as sessionService from '@/services/sessions';
 import * as eventService from '@/services/groupEvents';
+import { sendPushNotification } from '@/services/notifications';
+import { openSms, openEmail } from '@/utils/contactActions';
 import { useAuthStore } from './useAuthStore';
 import { useGroupStore } from './useGroupStore';
+
+export interface JourneyWatcher {
+  key: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  userId?: string | null;
+  pushToken?: string | null;
+  source: 'emergency' | 'contact' | 'manual';
+}
+
+export interface JourneyPrefill {
+  destinationName?: string;
+  destinationAddress?: string;
+  destinationLat?: number;
+  destinationLng?: number;
+}
+
+export interface StartJourneyOptions {
+  name: string;
+  destinationName?: string;
+  destinationAddress?: string;
+  destinationLat?: number;
+  destinationLng?: number;
+  message?: string;
+  watchers: JourneyWatcher[];
+}
 
 interface SessionStoreState {
   sessions: Session[];
@@ -21,6 +50,15 @@ interface SessionStoreState {
   } | null;
   setJourneyDraft: (d: SessionStoreState['journeyDraft']) => void;
   clearJourneyDraft: () => void;
+
+  // Unified Journey sheet
+  journeySheetOpen: boolean;
+  journeyPrefill: JourneyPrefill | null;
+  summarySession: Session | null;
+  openJourneySheet: (prefill?: JourneyPrefill | null) => void;
+  closeJourneySheet: () => void;
+  setSummarySession: (s: Session | null) => void;
+  startJourney: (opts: StartJourneyOptions) => Promise<Session | null>;
 
   loadGroupSessions: (groupId: string) => Promise<void>;
   loadMyJourneySession: () => Promise<void>;
