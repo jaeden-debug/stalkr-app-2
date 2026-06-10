@@ -113,11 +113,9 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
       destination_name: opts.destinationName ?? null,
       destination_latitude: opts.destinationLat ?? null,
       destination_longitude: opts.destinationLng ?? null,
+      message: opts.message ?? null,
       notify_on_end: true,
     } as any);
-    // Note: opts.message is delivered in the invite text; persisting it to
-    // sessions.message requires migration 012 (kept out of the insert so journey
-    // creation never fails if that migration hasn't been applied yet).
     if (!session) return null;
 
     // Watcher records.

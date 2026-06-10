@@ -164,17 +164,17 @@ export async function addWatcher(
   sessionId: string,
   w: { userId?: string | null; name?: string | null; phone?: string | null; email?: string | null; pushToken?: string | null; inviteSent?: boolean },
 ): Promise<void> {
-  // Base columns only (guaranteed to exist). name/phone/invite_sent are migration
-  // 012 enrichments and are omitted so this never fails pre-migration. In-app
-  // watchers (user_id + push_token) get arrival pushes; phone/email watchers
-  // receive the invite via SMS/email directly at journey start.
-  const row: Record<string, unknown> = { session_id: sessionId };
-  if (w.userId) row.user_id = w.userId;
-  if (w.email) row.email = w.email;
-  if (w.pushToken) row.push_token = w.pushToken;
-  // Skip rows that carry no targetable identity (manual phone-only watchers).
-  if (!row.user_id && !row.email && !row.push_token) return;
-  await supabase.from('session_watchers').insert(row as any);
+  // Skip rows with no identity at all.
+  if (!w.userId && !w.email && !w.phone) return;
+  await supabase.from('session_watchers').insert({
+    session_id: sessionId,
+    user_id: w.userId ?? null,
+    name: w.name ?? null,
+    phone: w.phone ?? null,
+    email: w.email ?? null,
+    push_token: w.pushToken ?? null,
+    invite_sent: w.inviteSent ?? false,
+  } as any);
 }
 
 /** Add a non-member watcher by email (called from watch page via RPC). */
