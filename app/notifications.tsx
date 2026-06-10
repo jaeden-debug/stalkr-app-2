@@ -25,6 +25,9 @@ const CATEGORY: Record<GroupEventType, Category> = {
   member_joined: 'Crew', member_left: 'Crew', member_kicked: 'Crew', role_changed: 'Crew',
   zone_entered: 'Zones', zone_left: 'Zones', zone_created: 'Zones', zone_deleted: 'Zones',
   arrival: 'Journeys',
+  journey_started: 'Journeys', journey_invite_sent: 'Journeys', journey_watcher_added: 'Journeys',
+  journey_arrived: 'Journeys', journey_completed: 'Journeys', journey_cancelled: 'Journeys',
+  journey_viewed: 'Journeys', journey_failed_to_notify: 'Alerts',
   session_started: 'Sessions', session_ended: 'Sessions',
   marker_created: 'System', marker_deleted: 'System', danger_marker_added: 'System', rally_point_set: 'System', settings_changed: 'System',
 };
@@ -34,6 +37,8 @@ const UI: Partial<Record<GroupEventType, { icon: IoniconName; color: string }>> 
   sos_cancelled: { icon: 'checkmark-circle', color: C.green }, deadman_cancelled: { icon: 'shield-checkmark', color: C.green },
   checkin_timer_missed: { icon: 'warning', color: C.red }, checkin_timer_completed: { icon: 'checkmark-circle', color: C.green },
   arrival: { icon: 'flag', color: C.green }, member_offline: { icon: 'cloud-offline', color: C.amber }, member_online: { icon: 'cloud-done', color: C.green },
+  journey_started: { icon: 'navigate', color: C.blue }, journey_arrived: { icon: 'flag', color: C.green }, journey_completed: { icon: 'checkmark-circle', color: C.green },
+  journey_cancelled: { icon: 'close-circle', color: C.amber }, journey_invite_sent: { icon: 'send', color: C.blue },
   zone_entered: { icon: 'enter', color: C.blue }, zone_left: { icon: 'exit', color: C.amber }, zone_created: { icon: 'scan', color: C.green }, zone_deleted: { icon: 'trash', color: 'rgba(255,255,255,0.5)' },
   marker_created: { icon: 'pin', color: C.green }, marker_deleted: { icon: 'trash', color: 'rgba(255,255,255,0.5)' },
   session_started: { icon: 'navigate', color: C.blue }, session_ended: { icon: 'flag', color: 'rgba(255,255,255,0.6)' },

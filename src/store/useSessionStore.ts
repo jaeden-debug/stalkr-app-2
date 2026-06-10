@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Session, SessionWatcher } from '@/types/models';
 import * as sessionService from '@/services/sessions';
 import * as eventService from '@/services/groupEvents';
-import { sendPushNotification } from '@/services/notifications';
+import { sendPushNotification, sendLocalNotification } from '@/services/notifications';
 import { openSms, openEmail } from '@/utils/contactActions';
 import { useAuthStore } from './useAuthStore';
 import { useGroupStore } from './useGroupStore';
@@ -90,6 +90,84 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
 
   setJourneyDraft: (d) => set({ journeyDraft: d }),
   clearJourneyDraft: () => set({ journeyDraft: null }),
+
+  journeySheetOpen: false,
+  journeyPrefill: null,
+  summarySession: null,
+  openJourneySheet: (prefill = null) => set({ journeySheetOpen: true, journeyPrefill: prefill }),
+  closeJourneySheet: () => set({ journeySheetOpen: false, journeyPrefill: null }),
+  setSummarySession: (s) => set({ summarySession: s }),
+
+  startJourney: async (opts) => {
+    const userId = useAuthStore.getState().session?.user?.id;
+    const profile = useAuthStore.getState().profile;
+    if (!userId) return null;
+    const groupId = useGroupStore.getState().activeGroupId;
+    const travelerName = profile?.nickname || profile?.display_name || 'Someone';
+
+    const session = await sessionService.createSession({
+      group_id: groupId ?? null,
+      created_by: userId,
+      name: opts.name || opts.destinationName || 'Journey',
+      traveler_name: travelerName,
+      destination_name: opts.destinationName ?? null,
+      destination_latitude: opts.destinationLat ?? null,
+      destination_longitude: opts.destinationLng ?? null,
+      notify_on_end: true,
+    } as any);
+    // Note: opts.message is delivered in the invite text; persisting it to
+    // sessions.message requires migration 012 (kept out of the insert so journey
+    // creation never fails if that migration hasn't been applied yet).
+    if (!session) return null;
+
+    // Watcher records.
+    for (const w of opts.watchers) {
+      await sessionService.addWatcher(session.id, {
+        userId: w.userId ?? null, name: w.name, phone: w.phone ?? null,
+        email: w.email ?? null, pushToken: w.pushToken ?? null, inviteSent: true,
+      }).catch(() => {});
+    }
+
+    // Invite delivery.
+    const url = sessionService.buildWatchUrl(session.watch_token);
+    const dest = opts.destinationName ? ` to ${opts.destinationName}` : '';
+    const inviteMsg = `${opts.message ? opts.message + '\n\n' : ''}${travelerName} is sharing a journey${dest} with you on Stalkr. Follow live progress and get notified when they arrive safely: ${url}`;
+    const phones = opts.watchers.filter((w) => w.phone).map((w) => w.phone as string);
+    const emails = opts.watchers.filter((w) => !w.phone && w.email).map((w) => w.email as string);
+    if (phones.length) openSms(phones, inviteMsg).catch(() => {});
+    if (emails.length) openEmail(emails, `${travelerName}'s journey on Stalkr`, inviteMsg).catch(() => {});
+
+    // In-app watchers get a push.
+    const memberWatchers = opts.watchers.filter((w) => w.pushToken && w.userId);
+    if (memberWatchers.length) {
+      sendPushNotification(
+        memberWatchers.map((w) => w.pushToken as string),
+        `${travelerName} started a journey`,
+        opts.destinationName ? `Heading to ${opts.destinationName}. Tap to follow live.` : 'Tap to follow their live progress.',
+        { type: 'general', sessionId: session.id },
+        'default',
+        memberWatchers.map((w) => w.userId as string),
+      ).catch(() => {});
+    }
+
+    // Activity events (only when crew-tied).
+    if (groupId) {
+      eventService.logEvent(groupId, userId, 'journey_started',
+        `Journey started${dest}`, opts.destinationName ? `${travelerName} is heading to ${opts.destinationName}.` : undefined).catch(() => {});
+      if (opts.watchers.length) {
+        eventService.logEvent(groupId, userId, 'journey_invite_sent',
+          `Invited ${opts.watchers.length} watcher${opts.watchers.length === 1 ? '' : 's'}`, undefined).catch(() => {});
+      }
+    }
+
+    set((s) => ({
+      sessions: [session, ...s.sessions],
+      activeJourneySession: session,
+      journeySheetOpen: false,
+      journeyPrefill: null,
+    }));
+    return session;
+  },
 
   loadGroupSessions: async (groupId) => {
     set({ isLoading: true, error: null });
@@ -186,9 +264,14 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
         activeSession: s.activeSession?.id === sessionId ? null : s.activeSession,
         activeJourneySession: s.activeJourneySession?.id === sessionId ? null : s.activeJourneySession,
       }));
+      const wasActiveJourney = session && session.status === 'active';
+      if (session) {
+        const now = new Date().toISOString();
+        set({ summarySession: { ...session, is_active: false, status: 'cancelled', ended_at: now } });
+      }
       const groupId = session?.group_id ?? useGroupStore.getState().activeGroupId;
       if (session && userId && groupId) {
-        await eventService.logEvent(groupId, userId, 'session_ended', `Session ended: ${session.name}`);
+        await eventService.logEvent(groupId, userId, wasActiveJourney ? 'journey_cancelled' : 'session_ended', `Journey ended: ${session.name}`);
       }
     }
     return ok;
@@ -209,15 +292,20 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
         activeSession: s.activeSession?.id === sessionId ? null : s.activeSession,
         activeJourneySession: null,
       }));
+      // Show the styled Journey Summary to the traveler.
+      if (session) {
+        const now = new Date().toISOString();
+        set({ summarySession: { ...session, is_active: false, status: 'arrived', arrived_at: now, ended_at: now } });
+        sendLocalNotification('You arrived safely', 'Journey complete.', { type: 'arrival', sessionId }, 'safety').catch(() => {});
+      }
       const groupId = session?.group_id ?? useGroupStore.getState().activeGroupId;
       if (session && userId && groupId) {
         await eventService.logEvent(
-          groupId,
-          userId,
-          'session_ended',
-          `✅ Arrived safely: ${session.name}`,
-          session.destination_name ? `Arrived at ${session.destination_name}` : undefined,
+          groupId, userId, 'journey_arrived',
+          `Arrived safely${session.destination_name ? `: ${session.destination_name}` : ''}`,
+          `${session.traveler_name ?? 'A crew member'} reached their destination.`,
         );
+        eventService.logEvent(groupId, userId, 'journey_completed', `Journey completed: ${session.name}`, undefined).catch(() => {});
       }
       // Trigger arrival email Edge Function (fire and forget)
       if (session) {

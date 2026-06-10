@@ -269,8 +269,8 @@ export const NavigationDrawer: React.FC = () => {
   const openJourneys = useCallback(() => {
     sheetRef.current?.snapToIndex(0);
     setCrewsModal(false);
-    router.push('/(tabs)/sessions');
-  }, [router]);
+    useSessionStore.getState().openJourneySheet(null);
+  }, []);
 
   const handleSwitchCrew = useCallback((id: string) => {
     Haptics.selectionAsync();

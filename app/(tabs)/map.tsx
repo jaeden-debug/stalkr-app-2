@@ -15,6 +15,8 @@ import { ZoneCreationSheet } from '@/components/zones/ZoneCreationSheet';
 import { SafetyCenter } from '@/components/safety/SafetyCenter';
 import { MeasurePanel } from '@/components/map/MeasurePanel';
 import { FilterSheet } from '@/components/map/FilterSheet';
+import { JourneySheet } from '@/components/journey/JourneySheet';
+import { JourneySummary } from '@/components/journey/JourneySummary';
 import { useMapStore } from '@/store/useMapStore';
 import { useLocationTracker } from '@/hooks/useLocationTracker';
 import { useRealtimeGroup } from '@/hooks/useRealtimeGroup';
@@ -48,6 +50,8 @@ export default function MapScreen() {
       <SafetyCenter />
       <MeasurePanel />
       <FilterSheet />
+      <JourneySheet />
+      <JourneySummary />
       <PlaceCard />
       <SearchOverlay />
 

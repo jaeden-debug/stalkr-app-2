@@ -187,14 +187,13 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   pinDragging: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    // Keep the same footprint as the resting pin so the bottom anchor (the GPS
+    // point) never shifts mid-drag — this makes drops land exactly where intended.
     borderWidth: 3,
+    borderColor: '#fff',
     shadowOpacity: 1,
     shadowRadius: 14,
     elevation: 14,
-    opacity: 0.92,
   },
   emoji: { fontSize: 18 },
   emojiSelected: { fontSize: 22 },

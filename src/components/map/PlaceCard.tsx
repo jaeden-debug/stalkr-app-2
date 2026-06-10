@@ -45,14 +45,13 @@ export const PlaceCard: React.FC = () => {
 
   const handleStartJourney = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setJourneyDraft({
-      name: place.name,
-      destinationName: place.address ?? place.name,
+    useSessionStore.getState().openJourneySheet({
+      destinationName: place.name,
+      destinationAddress: place.address,
       destinationLat: place.latitude,
       destinationLng: place.longitude,
     });
     clearSearchedPlace();
-    router.push('/(tabs)/sessions');
   };
 
   const handleSaveZone = () => {

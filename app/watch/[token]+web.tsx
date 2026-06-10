@@ -50,6 +50,7 @@ export default function WatchPage() {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [live, setLive] = useState<LivePayload | null>(null);
   const [arrived, setArrived] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [email, setEmail] = useState('');
   const [emailSent, setEmailSent] = useState(false);
@@ -73,15 +74,14 @@ export default function WatchPage() {
       }
       const s = data[0] as SessionInfo;
       setSession(s);
-      if (s.status === 'arrived' || !s.is_active) {
-        setArrived(true);
-      }
+      if (s.status === 'arrived') setArrived(true);
+      else if (s.status === 'cancelled' || !s.is_active) setCancelled(true);
     })();
   }, [token]);
 
   // ── Subscribe to Realtime broadcast ──────────────────────────────────────
   useEffect(() => {
-    if (!token || arrived) return;
+    if (!token || arrived || cancelled) return;
 
     const ch = supabase.channel(`session:${token}`)
       .on('broadcast', { event: 'location' }, ({ payload }) => {
@@ -96,7 +96,7 @@ export default function WatchPage() {
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [token, arrived]);
+  }, [token, arrived, cancelled]);
 
   // ── Init Google Maps ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -213,12 +213,20 @@ export default function WatchPage() {
     return (
       <div style={styles.center}>
         <div style={{ fontSize: 64 }}>✅</div>
-        <h2 style={styles.title}>
-          {session.traveler_name ?? 'Your contact'} arrived safely
-        </h2>
-        {session.destination_name && (
-          <p style={styles.sub}>at {session.destination_name}</p>
-        )}
+        <h2 style={styles.title}>{session.traveler_name ?? 'Your contact'} arrived safely</h2>
+        {session.destination_name && <p style={styles.sub}>at {session.destination_name}</p>}
+        <a href="https://navtrl.com/" style={styles.ctaLink as any}>No app required · Get Stalkr</a>
+      </div>
+    );
+  }
+
+  if (cancelled) {
+    return (
+      <div style={styles.center}>
+        <div style={{ fontSize: 56 }}>🏁</div>
+        <h2 style={styles.title}>Journey ended</h2>
+        <p style={styles.sub}>{session.traveler_name ?? 'Your contact'}'s journey is no longer active.</p>
+        <a href="https://navtrl.com/" style={styles.ctaLink as any}>No app required · Get Stalkr</a>
       </div>
     );
   }
@@ -315,6 +323,9 @@ export default function WatchPage() {
         )}
       </div>
 
+      <a href="https://navtrl.com/" style={styles.ctaBar as any}>
+        <span style={{ fontWeight: 700 }}>No app required</span> · Get Stalkr to track your own crew
+      </a>
       <p style={styles.footer}>Powered by Stalkr</p>
     </div>
   );
@@ -429,6 +440,23 @@ const styles: Record<string, React.CSSProperties> = {
     margin: '6px 0 0',
     color: '#ef4444',
     fontSize: 12,
+  },
+  ctaBar: {
+    display: 'block',
+    textAlign: 'center',
+    padding: '12px 16px',
+    fontSize: 13,
+    color: '#4ADE80',
+    textDecoration: 'none',
+    background: 'rgba(74,222,128,0.08)',
+    borderTop: '1px solid rgba(74,222,128,0.25)',
+  },
+  ctaLink: {
+    marginTop: 18,
+    color: '#4ADE80',
+    fontSize: 14,
+    fontWeight: 700,
+    textDecoration: 'none',
   },
   footer: {
     textAlign: 'center',

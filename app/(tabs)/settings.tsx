@@ -149,11 +149,11 @@ export default function SettingsScreen() {
         </Section>
 
         <Section title="SUPPORT & LEGAL">
-          <Row icon="help-buoy" label="HELP & SUPPORT" onPress={() => Linking.openURL('https://stalkr.app/support')} />
+          <Row icon="help-buoy" label="HELP & SUPPORT" onPress={() => Linking.openURL('https://navtrl.com/')} />
           <View style={s.sep} />
-          <Row icon="document-text" label="TERMS OF SERVICE" onPress={() => Linking.openURL('https://stalkr.app/terms')} />
+          <Row icon="document-text" label="TERMS OF SERVICE" onPress={() => Linking.openURL('https://navtrl.com/terms')} />
           <View style={s.sep} />
-          <Row icon="shield-checkmark" label="PRIVACY POLICY" onPress={() => Linking.openURL('https://stalkr.app/privacy')} />
+          <Row icon="shield-checkmark" label="PRIVACY POLICY" onPress={() => Linking.openURL('https://navtrl.com/privacy')} />
         </Section>
 
         <Section title="DANGER ZONE">
