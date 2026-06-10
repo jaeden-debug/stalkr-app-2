@@ -131,6 +131,11 @@ export async function removeGroupMember(memberId: string): Promise<boolean> {
   return !error;
 }
 
+export async function transferOwnership(groupId: string, newOwnerId: string): Promise<boolean> {
+  const { error } = await supabase.rpc('transfer_crew_ownership', { p_group: groupId, p_new_owner: newOwnerId });
+  return !error;
+}
+
 export async function regenerateInviteCode(groupId: string): Promise<string | null> {
   // Generate new code on server side by updating a dummy field then letting the DB trigger handle it
   // Since we don't have a trigger, we generate client-side

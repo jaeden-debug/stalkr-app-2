@@ -491,7 +491,7 @@ export const useMapStore = create<MapState>()(
           polygon_coords: type === 'polygon' ? polygonPoints : [],
           notify_on_arrival: notifyArrival,
           notify_on_leave: notifyLeave,
-          visible_to_group: true,
+          visibility: 'crew',
           alert_rules: {},
         } as any);
 

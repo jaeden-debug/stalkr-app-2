@@ -57,6 +57,7 @@ import { useAnalytics } from '@/hooks/useAnalytics';
 import { getLocationStatus } from '@/utils/time';
 import { buildWatchUrl } from '@/services/sessions';
 import { MARKER_TYPES } from '@/constants/markerTypes';
+import { can } from '@/utils/roles';
 import { C } from '@/constants/theme';
 import type { GroupMember } from '@/types/models';
 import type { MarkerType } from '@/types/database';
@@ -172,6 +173,8 @@ export const NavigationDrawer: React.FC = () => {
   const joinByInviteCode = useGroupStore((s) => s.joinByInviteCode);
   const loadGroupMembers = useGroupStore((s) => s.loadGroupMembers);
   const activeGroup = useMemo(() => groups.find((g) => g.id === activeGroupId) ?? null, [groups, activeGroupId]);
+  const myRole = useMemo(() => groupMembers.find((m) => m.user_id === userId)?.role, [groupMembers, userId]);
+  const canContribute = can(myRole, 'contribute');
 
   const isBroadcasting = useLocationStore((s) => s.isBroadcasting);
   const crewLocations  = useLocationStore((s) => s.crewLocations);
@@ -611,9 +614,10 @@ export const NavigationDrawer: React.FC = () => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.actionTile, !activeGroup && styles.actionTileDisabled]}
+                  style={[styles.actionTile, (!activeGroup || !canContribute) && styles.actionTileDisabled]}
                   onPress={() => {
                     if (!activeGroupId) { Alert.alert('NO ACTIVE CREW', 'Select a crew first.'); return; }
+                    if (!canContribute) { Alert.alert('VIEWER ROLE', 'Viewers have read-only access and cannot place markers.'); return; }
                     setMarkerModal(true);
                   }}
                   activeOpacity={0.75}
@@ -623,9 +627,10 @@ export const NavigationDrawer: React.FC = () => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.actionTile, !activeGroup && styles.actionTileDisabled]}
+                  style={[styles.actionTile, (!activeGroup || !canContribute) && styles.actionTileDisabled]}
                   onPress={() => {
                     if (!activeGroupId) { Alert.alert('NO ACTIVE CREW', 'Select a crew first.'); return; }
+                    if (!canContribute) { Alert.alert('VIEWER ROLE', 'Viewers have read-only access and cannot create zones.'); return; }
                     setZoneModal(true);
                   }}
                   activeOpacity={0.75}

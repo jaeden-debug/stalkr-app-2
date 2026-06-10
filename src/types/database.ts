@@ -3,7 +3,7 @@
  * Generated from the schema — update if migrations add columns.
  */
 
-export type MemberRole = 'owner' | 'admin' | 'member';
+export type MemberRole = 'owner' | 'admin' | 'moderator' | 'member' | 'viewer';
 export type SharingMode = 'always' | 'sessions_only' | 'paused' | 'private';
 export type LocationStatus = 'live' | 'stale' | 'offline' | 'paused';
 export type GroupType = 'hunting' | 'hiking' | 'camping' | 'family' | 'atv' | 'custom';

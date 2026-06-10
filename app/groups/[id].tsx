@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import { uploadCrewAvatar } from '@/services/auth';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useNotificationStore } from '@/store/useNotificationStore';
@@ -22,8 +24,11 @@ import { Toggle } from '@/components/ui/Toggle';
 import { LoadingOverlay } from '@/components/ui/LoadingOverlay';
 import { useToast } from '@/components/ui/Toast';
 import { getCrewColor } from '@/constants/map';
+import { can, assignableRoles, ROLE_LABEL, ROLE_COLOR } from '@/utils/roles';
+import { transferOwnership } from '@/services/groups';
 import { C } from '@/constants/theme';
 import type { GroupMember } from '@/types/models';
+import type { MemberRole } from '@/types/database';
 
 export default function CrewSettingsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -51,6 +56,7 @@ export default function CrewSettingsScreen() {
   const [callSign, setCallSign] = useState('');
   const [crewInitials, setCrewInitials] = useState('');
   const [savingId, setSavingId] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   // Crew management (owner)
   const [groupName, setGroupName] = useState(group?.name ?? '');
@@ -77,6 +83,21 @@ export default function CrewSettingsScreen() {
 
   const crewPref = crewMap[group.id] ?? { muted: false, crewZoneActivity: null };
   const effectiveCrewActivity = crewPref.crewZoneActivity ?? globalCrewActivity;
+
+  const handlePickCrewAvatar = async () => {
+    if (!myMembership || !userId || !id) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { toast.error('Photo permission needed'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [1, 1], quality: 0.6 });
+    if (result.canceled || !result.assets?.[0]?.uri) return;
+    setUploadingAvatar(true);
+    const url = await uploadCrewAvatar(id, userId, result.assets[0].uri);
+    if (url) {
+      await updateMember(myMembership.id, { avatar_url_override: url });
+      toast.success('Crew photo updated');
+    } else toast.error('Upload failed');
+    setUploadingAvatar(false);
+  };
 
   const handleSaveIdentity = async () => {
     if (!myMembership) return;
@@ -132,6 +153,27 @@ export default function CrewSettingsScreen() {
     ]);
   };
 
+  const myRole = (myMembership?.role ?? 'member') as MemberRole;
+  const canManageMembers = can(myRole, 'manageMembers');
+  const roleOptions = assignableRoles(myRole);
+
+  const handleSetRole = async (m: GroupMember, role: MemberRole) => {
+    if (m.role === role) return;
+    const ok = await updateMember(m.id, { role });
+    if (ok) toast.success(`${ROLE_LABEL[role]} role set`); else toast.error('Failed to set role');
+  };
+
+  const handleTransfer = (m: GroupMember) => {
+    const name = m.nickname_override ?? m.profile?.display_name ?? 'this member';
+    Alert.alert('Transfer Ownership', `Make ${name} the owner? You'll become an admin. This cannot be undone by you afterward.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Transfer', style: 'destructive', onPress: async () => {
+        const ok = await transferOwnership(group.id, m.user_id);
+        if (ok) { toast.success('Ownership transferred'); loadGroupMembers(group.id); } else toast.error('Transfer failed');
+      } },
+    ]);
+  };
+
   const toggleExpand = (uid: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -164,8 +206,21 @@ export default function CrewSettingsScreen() {
           )}
 
           {/* Your identity in this crew */}
-          <Text style={s.sectionLabel}>YOUR CALL SIGN IN THIS CREW</Text>
+          <Text style={s.sectionLabel}>YOUR IDENTITY IN THIS CREW</Text>
           <View style={s.card}>
+            <View style={{ alignItems: 'center', gap: 6, paddingBottom: 4 }}>
+              <TouchableOpacity onPress={handlePickCrewAvatar} activeOpacity={0.85} disabled={uploadingAvatar}>
+                <Avatar
+                  uri={myMembership?.avatar_url_override || myMembership?.profile?.avatar_url}
+                  initials={(crewInitials || myMembership?.initials_override || myMembership?.profile?.initials) ?? undefined}
+                  displayName={callSign || 'You'}
+                  size={72}
+                  color={C.green}
+                />
+                <View style={s.crewAvatarBadge}><Ionicons name="camera" size={13} color="#000" /></View>
+              </TouchableOpacity>
+              <Text style={s.crewAvatarHint}>{uploadingAvatar ? 'Uploading…' : 'Tap to set a crew-only photo'}</Text>
+            </View>
             <Text style={s.fieldLabel}>CALL SIGN</Text>
             <TextInput
               style={s.input}
@@ -225,10 +280,34 @@ export default function CrewSettingsScreen() {
                       <Avatar uri={m.avatar_url_override || m.profile?.avatar_url} initials={m.initials_override || m.profile?.initials} displayName={name} size={40} color={getCrewColor(m.user_id)} />
                       <View style={{ flex: 1 }}>
                         <Text style={s.memberName}>{name}{isMe ? ' (You)' : ''}</Text>
-                        <Text style={s.memberRole}>{m.role}{!isMe && mp.muted ? ' · muted' : ''}</Text>
+                        <View style={s.roleRow}>
+                          <View style={[s.roleBadge, { borderColor: ROLE_COLOR[m.role] }]}>
+                            <Text style={[s.roleBadgeText, { color: ROLE_COLOR[m.role] }]}>{ROLE_LABEL[m.role].toUpperCase()}</Text>
+                          </View>
+                          {!isMe && mp.muted && <Text style={s.mutedTag}>muted</Text>}
+                        </View>
                       </View>
                       {!isMe && <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color="rgba(255,255,255,0.4)" />}
                     </TouchableOpacity>
+
+                    {!isMe && open && canManageMembers && (
+                      <View style={s.roleManage}>
+                        <Text style={s.roleManageLabel}>ROLE</Text>
+                        <View style={s.roleChips}>
+                          {roleOptions.map((r) => (
+                            <TouchableOpacity key={r} style={[s.roleChip, m.role === r && s.roleChipActive]} onPress={() => handleSetRole(m, r)} activeOpacity={0.8}>
+                              <Text style={[s.roleChipText, m.role === r && { color: C.green }]}>{ROLE_LABEL[r]}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                        {isOwner && (
+                          <TouchableOpacity style={s.transferBtn} onPress={() => handleTransfer(m)} activeOpacity={0.85}>
+                            <Ionicons name="ribbon" size={14} color={C.amber} />
+                            <Text style={s.transferText}>Transfer ownership</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    )}
 
                     {!isMe && open && userId && (
                       <View style={s.memberPrefs}>
@@ -332,6 +411,8 @@ const s = StyleSheet.create({
     backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 14, gap: 8,
   },
   fieldLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
+  crewAvatarBadge: { position: 'absolute', right: -2, bottom: -2, width: 26, height: 26, borderRadius: 13, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: C.bg },
+  crewAvatarHint: { color: 'rgba(255,255,255,0.45)', fontSize: 11, fontWeight: '600' },
   input: {
     backgroundColor: 'rgba(0,0,0,0.3)', borderWidth: 1, borderColor: C.border,
     borderRadius: 12, paddingHorizontal: 14, height: 50, color: '#FFFFFF', fontSize: 15, fontWeight: '600',
@@ -348,7 +429,18 @@ const s = StyleSheet.create({
   memberDivider: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.07)', marginTop: 4, paddingTop: 8 },
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 },
   memberName: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-  memberRole: { color: 'rgba(255,255,255,0.4)', fontSize: 12, textTransform: 'capitalize', marginTop: 2 },
+  roleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  roleBadge: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  roleBadgeText: { fontSize: 8, fontWeight: '900', letterSpacing: 0.8 },
+  mutedTag: { color: 'rgba(255,255,255,0.4)', fontSize: 11 },
+  roleManage: { marginTop: 8, marginLeft: 4, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: C.blueBorder, gap: 6 },
+  roleManageLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 9, fontWeight: '900', letterSpacing: 1.2 },
+  roleChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  roleChip: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.05)' },
+  roleChipActive: { borderColor: C.greenBorder, backgroundColor: C.greenDim },
+  roleChipText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '800' },
+  transferBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
+  transferText: { color: C.amber, fontSize: 13, fontWeight: '700' },
   memberPrefs: {
     marginTop: 6, marginLeft: 4, paddingLeft: 12,
     borderLeftWidth: 2, borderLeftColor: C.greenBorder,

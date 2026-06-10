@@ -87,6 +87,25 @@ export async function uploadAvatar(userId: string, uri: string): Promise<string 
   }
 }
 
+/** Per-crew avatar override — stored separately so it never touches the global photo. */
+export async function uploadCrewAvatar(groupId: string, userId: string, uri: string): Promise<string | null> {
+  try {
+    const ext = uri.split('.').pop() ?? 'jpg';
+    const path = `crew/${groupId}/${userId}.${ext}`;
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const { error } = await supabase.storage.from('avatars').upload(path, blob, {
+      upsert: true,
+      contentType: `image/${ext}`,
+    });
+    if (error) return null;
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    return `${data.publicUrl}?v=${Date.now()}`;
+  } catch {
+    return null;
+  }
+}
+
 export async function markOnline(userId: string): Promise<void> {
   await supabase
     .from('profiles')
