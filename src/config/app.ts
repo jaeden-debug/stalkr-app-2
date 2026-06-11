@@ -5,9 +5,9 @@ export const APP_CONFIG = {
   /** App slug / URL scheme */
   slug: 'stalkr',
   /** Support email */
-  supportEmail: 'support@stalkr.app',
+  supportEmail: 'navtrl@stillawakemedia.com',
   /** Privacy policy URL */
-  privacyUrl: 'https://stalkr.app/privacy',
+  privacyUrl: 'https://navtrl.com/privacy',
   /** Terms of service URL */
-  termsUrl: 'https://stalkr.app/terms',
+  termsUrl: 'https://navtrl.com/terms',
 } as const;

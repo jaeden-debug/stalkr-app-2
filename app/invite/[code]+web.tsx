@@ -34,7 +34,7 @@ import { track } from '@/services/analytics';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PRODUCTION_ORIGIN = 'https://stalkr.app';
+const PRODUCTION_ORIGIN = 'https://app.navtrl.com';
 // Set EXPO_PUBLIC_APP_STORE_ID + EXPO_PUBLIC_TESTFLIGHT_CODE once the app is live
 // in App Store Connect. Falls back to placeholders for preview builds.
 const APP_STORE_ID = process.env.EXPO_PUBLIC_APP_STORE_ID || '0000000000';

@@ -8,7 +8,7 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 import type { PropsWithChildren } from 'react';
 
-const ORIGIN = 'https://stalkr.app';
+const ORIGIN = 'https://app.navtrl.com';
 const DEFAULT_OG_IMAGE = `${ORIGIN}/stalkr-app-social-preview-og-image.png`;
 const DEFAULT_TITLE = 'Stalkr | Real-Time Location Awareness & Safety Tracking';
 const DEFAULT_DESC  = 'Know where your people are. Real-time location awareness built for modern outdoor life.';

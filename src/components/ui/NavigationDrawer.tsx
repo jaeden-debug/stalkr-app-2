@@ -56,6 +56,10 @@ import { useGoDark } from '@/hooks/useGoDark';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { getLocationStatus } from '@/utils/time';
 import { buildWatchUrl } from '@/services/sessions';
+import { shareWithLink } from '@/utils/contactActions';
+
+/** Public invite link — opens the app (universal link) or the web invite page. */
+const buildInviteUrl = (code: string) => `https://app.navtrl.com/invite/${code}`;
 import { MARKER_TYPES } from '@/constants/markerTypes';
 import { can } from '@/utils/roles';
 import { C } from '@/constants/theme';
@@ -232,10 +236,11 @@ export const NavigationDrawer: React.FC = () => {
       return;
     }
     try {
-      await Share.share({
-        title: `Join ${activeGroup.name} on Stalkr`,
-        message: `Join my crew "${activeGroup.name}"\nInvite code: ${activeGroup.invite_code}`,
-      });
+      await shareWithLink(
+        `Join my crew "${activeGroup.name}" on Stalkr. Tap to join (invite code ${activeGroup.invite_code}):`,
+        buildInviteUrl(activeGroup.invite_code),
+        `Join ${activeGroup.name} on Stalkr`,
+      );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       track({ name: 'invite_shared', properties: { method: 'share_sheet' } });
     } catch {}
@@ -419,14 +424,12 @@ export const NavigationDrawer: React.FC = () => {
       const url = buildWatchUrl(session.watch_token);
       const destText = session.destination_name ? ` to ${session.destination_name}` : '';
       const contactNames = contactList.map((c) => c.name).filter(Boolean).join(', ');
-      const contactLine = contactNames ? `\n\nNotifying: ${contactNames}` : '';
-      try {
-        await Share.share({
-          title: `Watch my journey${destText}`,
-          message: `${session.traveler_name ?? 'Someone'} is on their way${destText}. Follow live: ${url}${contactLine}`,
-          url,
-        });
-      } catch {}
+      const contactLine = contactNames ? ` Notifying: ${contactNames}.` : '';
+      await shareWithLink(
+        `${session.traveler_name ?? 'Someone'} is on their way${destText}. Follow live and get notified on arrival:${contactLine}`,
+        url,
+        `Watch my journey${destText}`,
+      );
     } catch (e: any) {
       Alert.alert('JOURNEY ERROR', e?.message ?? 'Unable to start journey.');
     } finally {

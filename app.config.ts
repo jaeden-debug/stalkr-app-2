@@ -39,7 +39,7 @@ export default ({ config }: ConfigContext): any => ({
     },
     // Universal Links — iOS opens the app from https://stalkr.app/invite/*
     // Requires AASA file at https://stalkr.app/.well-known/apple-app-site-association
-    associatedDomains: ['applinks:stalkr.app'],
+    associatedDomains: ['applinks:app.navtrl.com'],
   },
   android: {
     adaptiveIcon: {
@@ -72,7 +72,7 @@ export default ({ config }: ConfigContext): any => ({
         data: [
           {
             scheme: 'https',
-            host: 'stalkr.app',
+            host: 'app.navtrl.com',
             pathPrefix: '/invite',
           },
         ],

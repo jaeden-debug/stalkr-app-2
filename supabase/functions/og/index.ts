@@ -19,7 +19,7 @@
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const ORIGIN = 'https://stalkr.app';
+const ORIGIN = 'https://app.navtrl.com';
 const IMG_CREW = `${ORIGIN}/stalkr-crew-invite-og-image.png`;
 const IMG_JOURNEY = `${ORIGIN}/stalkr-crew-invite-og-image-new.png`;
 const IMG_APP = `${ORIGIN}/stalkr-app-social-preview-og-image.png`;

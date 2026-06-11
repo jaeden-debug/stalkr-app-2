@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import type { Session, SessionMember, SessionWatcher } from '@/types/models';
 import type { DbSessionInsert, DbSessionUpdate, DbSessionWatcherInsert } from '@/types/database';
 
-const WATCH_BASE_URL = 'https://stalkr.app/watch';
+const WATCH_BASE_URL = 'https://app.navtrl.com/watch';
 
 /** Build the public watch URL for a session. */
 export function buildWatchUrl(watchToken: string): string {

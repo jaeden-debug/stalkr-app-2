@@ -9,7 +9,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/services/supabase';
 import { addEmailWatcher } from '@/services/sessions';
 
-const ORIGIN = 'https://stalkr.app';
+const ORIGIN = 'https://app.navtrl.com';
 const OG_IMAGE = `${ORIGIN}/stalkr-crew-invite-og-image-new.png`;
 
 // ─── Google Maps global (loaded dynamically) ─────────────────────────────────

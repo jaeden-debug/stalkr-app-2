@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/services/supabase';
 import { buildWatchUrl } from '@/services/sessions';
+import { shareWithLink } from '@/utils/contactActions';
 import { useSessionStore } from '@/store/useSessionStore';
 import { getDistance, formatDistance, formatDistanceMiles } from '@/utils/distance';
 import { formatSpeed } from '@/utils/heading';
@@ -66,12 +67,11 @@ export const JourneySummary: React.FC = () => {
   const handleShare = async () => {
     const url = buildWatchUrl(session.watch_token);
     const dest = session.destination_name ? ` to ${session.destination_name}` : '';
-    try {
-      await Share.share({
-        message: `${session.traveler_name ?? 'I'} ${arrived ? 'arrived safely' : 'completed a journey'}${dest} on Stalkr. ${durationStr} · view: ${url}`,
-        url,
-      });
-    } catch {}
+    const dur = durationStr ? ` ${durationStr}.` : '';
+    await shareWithLink(
+      `${session.traveler_name ?? 'I'} ${arrived ? 'arrived safely' : 'completed a journey'}${dest} on Stalkr.${dur} Tap to view the journey:`,
+      url,
+    );
   };
 
   const Row: React.FC<{ icon: React.ComponentProps<typeof Ionicons>['name']; label: string; value: string }> = ({ icon, label, value }) => (
