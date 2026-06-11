@@ -6,6 +6,7 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { Marker } from 'react-native-maps';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useMapStore } from '@/store/useMapStore';
 import { updateMarker } from '@/services/markers';
@@ -115,7 +116,7 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
           </View>
         )}
 
-        {/* Pin body */}
+        {/* Pin body — Ionicon (matches the nav-drawer quick-option icons) */}
         <View
           style={[
             styles.pin,
@@ -124,9 +125,11 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
             isDragging && [styles.pinDragging, { borderColor: '#fff', shadowColor: config.color }],
           ]}
         >
-          <Text style={[styles.emoji, (isSelected || isDragging) && styles.emojiSelected]}>
-            {config.emoji}
-          </Text>
+          <Ionicons
+            name={config.ionicon}
+            size={isSelected || isDragging ? 22 : 18}
+            color={config.color}
+          />
         </View>
 
         {/* Stem */}

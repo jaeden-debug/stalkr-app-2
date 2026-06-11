@@ -7,12 +7,14 @@ import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacit
 import { Sheet } from '@/components/ui/Sheet';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { PhotoGallery } from '@/components/ui/PhotoGallery';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useToast } from '@/components/ui/Toast';
-import { deleteSavedPlace, updateSavedPlace } from '@/services/savedPlaces';
+import { deleteSavedPlace, updateSavedPlace, fetchSavedPlacePhotos, uploadSavedPlacePhoto } from '@/services/savedPlaces';
 import { logEvent } from '@/services/groupEvents';
 import { timeAgo } from '@/utils/time';
+import { formatDistanceBoth } from '@/utils/distance';
 
 interface ZoneDetailSheetProps {
   visible: boolean;
@@ -136,7 +138,7 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
         {zone.shape_type === 'circle' && (
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Radius</Text>
-            <Text style={styles.detailValue}>{zone.radius_meters}m</Text>
+            <Text style={styles.detailValue}>{formatDistanceBoth(zone.radius_meters)}</Text>
           </View>
         )}
         {zone.shape_type === 'polygon' && (
@@ -145,6 +147,14 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
             <Text style={styles.detailValue}>{zone.polygon_coords?.length ?? 0} vertices</Text>
           </View>
         )}
+
+        {/* Photos */}
+        <PhotoGallery
+          reloadKey={zone.id}
+          canEdit={!!userId}
+          load={() => fetchSavedPlacePhotos(zone.id).then((ps) => ps.map((p) => ({ id: p.id, url: p.url })))}
+          upload={(uri) => uploadSavedPlacePhoto(zone.id, zone.group_id, userId!, uri).then((p) => (p ? { id: p.id, url: p.url } : null))}
+        />
 
         {/* Alert settings — editable for owner, read-only for others */}
         <View style={styles.alertsBox}>

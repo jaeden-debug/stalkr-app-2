@@ -17,7 +17,7 @@ import { useSessionStore, type JourneyWatcher } from '@/store/useSessionStore';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { fetchEmergencyContacts } from '@/services/emergencyContacts';
-import { getDistance, formatDistance } from '@/utils/distance';
+import { getDistance, formatDistanceBoth } from '@/utils/distance';
 import { C } from '@/constants/theme';
 import type { EmergencyContact } from '@/types/models';
 
@@ -44,6 +44,10 @@ export const JourneySheet: React.FC = () => {
   const [manualOpen, setManualOpen] = useState(false);
   const [manualName, setManualName] = useState('');
   const [manualValue, setManualValue] = useState('');
+  const [contactsOpen, setContactsOpen] = useState(false);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [phoneContacts, setPhoneContacts] = useState<{ id: string; name: string; value: string }[]>([]);
+  const [contactSearch, setContactSearch] = useState('');
 
   const placesRef = useRef<any>(null);
 
@@ -72,30 +76,36 @@ export const JourneySheet: React.FC = () => {
   const removeWatcher = (key: string) => setWatchers((prev) => prev.filter((w) => w.key !== key));
 
   const openContacts = async () => {
-    // Use the NATIVE iOS/Android contact picker. A nested React Native <Modal>
-    // inside the JourneySheet modal silently fails to present on iOS (only one
-    // modal can be shown at a time), which is why "the contact sheet never opened."
-    // presentContactPickerAsync is presented by the OS and needs no permission.
+    // Reliable approach: load contacts and render them INLINE in this sheet (no
+    // nested Modal, no native picker — both fail to present over the journey
+    // Modal on iOS). Toggle closed if already open.
+    if (contactsOpen) { setContactsOpen(false); return; }
+    setContactsLoading(true);
     try {
-      const contact = await Contacts.presentContactPickerAsync();
-      if (!contact) return;
-      const phone = contact.phoneNumbers?.[0]?.number ?? null;
-      const email = contact.emails?.[0]?.email ?? null;
-      if (!phone && !email) {
-        Alert.alert('No phone or email', `${contact.name ?? 'That contact'} has no phone number or email to send a watch link to. Add one manually instead.`);
+      const { status } = await Contacts.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Contacts access', 'Allow contacts in Settings to pick from them, or add one manually.');
         setManualOpen(true);
         return;
       }
-      addWatcher({
-        key: `contact-${phone || email}`,
-        name: contact.name ?? 'Contact',
-        phone,
-        email: phone ? null : email,
-        source: 'contact',
+      const { data } = await Contacts.getContactsAsync({
+        fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails],
       });
+      const cleaned = data
+        .map((c, i) => {
+          const value = c.phoneNumbers?.[0]?.number || c.emails?.[0]?.email || '';
+          return { id: String((c as any).id ?? i), name: c.name ?? 'Unknown', value };
+        })
+        .filter((c) => c.value)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setPhoneContacts(cleaned);
+      setContactSearch('');
+      setContactsOpen(true);
     } catch {
-      Alert.alert('Could not open contacts', 'Please add the contact manually instead.');
+      Alert.alert('Could not load contacts', 'Add the contact manually instead.');
       setManualOpen(true);
+    } finally {
+      setContactsLoading(false);
     }
   };
 
@@ -107,7 +117,7 @@ export const JourneySheet: React.FC = () => {
     setManualName(''); setManualValue(''); setManualOpen(false);
   };
 
-  const distance = dest && myLocation ? formatDistance(getDistance(myLocation, { latitude: dest.lat, longitude: dest.lng })) : null;
+  const distance = dest && myLocation ? formatDistanceBoth(getDistance(myLocation, { latitude: dest.lat, longitude: dest.lng })) : null;
 
   const doStart = async () => {
     if (!dest) { Alert.alert('Choose a destination', 'Search and select where you are heading.'); return; }
@@ -222,12 +232,51 @@ export const JourneySheet: React.FC = () => {
 
                 <View style={s.addRow}>
                   <TouchableOpacity style={s.addBtn} onPress={openContacts} activeOpacity={0.85}>
-                    <Ionicons name="people" size={15} color={C.green} /><Text style={s.addBtnText}>PHONE CONTACT</Text>
+                    {contactsLoading
+                      ? <ActivityIndicator size="small" color={C.green} />
+                      : <Ionicons name="people" size={15} color={C.green} />}
+                    <Text style={s.addBtnText}>{contactsOpen ? 'HIDE' : 'PHONE CONTACT'}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={s.addBtn} onPress={() => setManualOpen((v) => !v)} activeOpacity={0.85}>
                     <Ionicons name="create" size={15} color={C.green} /><Text style={s.addBtnText}>MANUAL</Text>
                   </TouchableOpacity>
                 </View>
+
+                {/* Inline phone-contacts list (no nested modal) */}
+                {contactsOpen && (
+                  <View style={s.contactsBox}>
+                    <TextInput
+                      style={s.input} value={contactSearch} onChangeText={setContactSearch}
+                      placeholder="Search contacts" placeholderTextColor="rgba(255,255,255,0.3)" autoCapitalize="none"
+                    />
+                    <View style={s.contactsList}>
+                      {phoneContacts
+                        .filter((c) => !contactSearch.trim() || c.name.toLowerCase().includes(contactSearch.toLowerCase()))
+                        .slice(0, 40)
+                        .map((c) => {
+                          const key = `ph-${c.id}`;
+                          const added = watchers.some((w) => w.key === key);
+                          const isEmail = c.value.includes('@');
+                          return (
+                            <TouchableOpacity
+                              key={c.id}
+                              style={s.contactRow}
+                              activeOpacity={0.8}
+                              onPress={() => added ? removeWatcher(key) : addWatcher({ key, name: c.name, phone: isEmail ? null : c.value, email: isEmail ? c.value : null, source: 'contact' })}
+                            >
+                              <View style={s.watcherAvatar}><Text style={s.watcherInit}>{c.name.slice(0, 1).toUpperCase()}</Text></View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={s.watcherName} numberOfLines={1}>{c.name}</Text>
+                                <Text style={s.watcherMeta} numberOfLines={1}>{c.value}</Text>
+                              </View>
+                              <Ionicons name={added ? 'checkmark-circle' : 'add-circle-outline'} size={20} color={added ? C.green : 'rgba(255,255,255,0.4)'} />
+                            </TouchableOpacity>
+                          );
+                        })}
+                      {phoneContacts.length === 0 && <Text style={s.watcherMeta}>No contacts with a phone or email found.</Text>}
+                    </View>
+                  </View>
+                )}
 
                 {manualOpen && (
                   <View style={s.manualBox}>
@@ -296,6 +345,9 @@ const s = StyleSheet.create({
   contactChipAdded: { borderColor: C.greenBorder, backgroundColor: C.greenDim },
   contactChipText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '700' },
   addRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  contactsBox: { marginTop: 8, gap: 8 },
+  contactsList: { gap: 4, maxHeight: 240 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
   addBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: C.greenBorder, backgroundColor: C.greenDim },
   addBtnText: { color: C.green, fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
   manualBox: { gap: 8, marginTop: 8 },

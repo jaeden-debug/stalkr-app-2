@@ -2,6 +2,28 @@ import { supabase } from './supabase';
 import type { SavedPlace, SavedPlacePresence, SavedPlacePhoto } from '@/types/models';
 import type { DbSavedPlaceInsert, DbSavedPlaceUpdate } from '@/types/database';
 
+/**
+ * Coerce a raw saved_places row into the shape ZoneLayer expects. Supabase
+ * realtime payloads can deliver numeric/jsonb columns in a slightly different
+ * shape than a normal select (e.g. lat/lng as strings, polygon_coords as a JSON
+ * string), which made Number.isFinite() drop the zone → it vanished after place.
+ * Normalizing on every ingest path fixes that for good.
+ */
+export function normalizeSavedPlace(row: any): SavedPlace {
+  let poly = row?.polygon_coords;
+  if (typeof poly === 'string') {
+    try { poly = JSON.parse(poly); } catch { poly = []; }
+  }
+  if (!Array.isArray(poly)) poly = [];
+  return {
+    ...row,
+    latitude: Number(row?.latitude),
+    longitude: Number(row?.longitude),
+    radius_meters: Number(row?.radius_meters) || 100,
+    polygon_coords: poly,
+  } as SavedPlace;
+}
+
 export async function fetchGroupSavedPlaces(groupId: string): Promise<SavedPlace[]> {
   const { data, error } = await supabase
     .from('saved_places')
@@ -9,7 +31,7 @@ export async function fetchGroupSavedPlaces(groupId: string): Promise<SavedPlace
     .eq('group_id', groupId)
     .order('created_at', { ascending: false });
   if (error || !data) return [];
-  return data as SavedPlace[];
+  return data.map(normalizeSavedPlace);
 }
 
 export async function createSavedPlace(insert: DbSavedPlaceInsert): Promise<SavedPlace | null> {
@@ -24,7 +46,7 @@ export async function createSavedPlace(insert: DbSavedPlaceInsert): Promise<Save
     console.error('createSavedPlace failed:', error?.message, error?.details, error?.code);
     return null;
   }
-  return data as SavedPlace;
+  return normalizeSavedPlace(data);
 }
 
 export async function updateSavedPlace(

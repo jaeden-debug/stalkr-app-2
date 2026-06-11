@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
@@ -49,9 +50,11 @@ export default function LoginScreen() {
       >
         {/* Logo / branding */}
         <View style={styles.brand}>
-          <Text style={styles.brandEmoji}>🎯</Text>
+          <View style={styles.logoMark}>
+            <Ionicons name="navigate" size={34} color="#22c55e" />
+          </View>
           <Text style={styles.brandName}>{APP_CONFIG.name}</Text>
-          <Text style={styles.brandTagline}>Real-time crew safety & tracking</Text>
+          <Text style={styles.brandTagline}>Real-time location awareness & safety</Text>
         </View>
 
         {/* Form */}
@@ -61,7 +64,7 @@ export default function LoginScreen() {
             <TextInput
               style={styles.input}
               placeholder="your@email.com"
-              placeholderTextColor="#5555aa"
+              placeholderTextColor="rgba(255,255,255,0.35)"
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -76,7 +79,7 @@ export default function LoginScreen() {
             <TextInput
               style={styles.input}
               placeholder="••••••••"
-              placeholderTextColor="#5555aa"
+              placeholderTextColor="rgba(255,255,255,0.35)"
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -116,25 +119,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 32,
   },
-  brand: { alignItems: 'center', gap: 8 },
-  brandEmoji: { fontSize: 56 },
-  brandName: {
-    color: '#e8e8f0',
-    fontSize: 32,
-    fontWeight: '800',
-    letterSpacing: 1,
+  brand: { alignItems: 'center', gap: 10 },
+  logoMark: {
+    width: 72, height: 72, borderRadius: 22,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(34,197,94,0.12)',
+    borderWidth: 1, borderColor: 'rgba(34,197,94,0.4)',
+    shadowColor: '#22c55e', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5, shadowRadius: 16,
   },
-  brandTagline: { color: '#8888aa', fontSize: 14 },
+  brandName: {
+    color: '#f8fafc',
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: 4,
+  },
+  brandTagline: { color: 'rgba(255,255,255,0.5)', fontSize: 13 },
   form: { gap: 16 },
   fieldGroup: { gap: 6 },
-  label: { color: '#8888aa', fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
+  label: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
   input: {
-    backgroundColor: '#1a1a24',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: '#2a2a3a',
-    borderRadius: 12,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 14,
     padding: 14,
-    color: '#e8e8f0',
+    color: '#f8fafc',
     fontSize: 16,
     height: 52,
   },

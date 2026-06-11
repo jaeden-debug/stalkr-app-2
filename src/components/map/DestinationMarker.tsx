@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Circle, Marker } from 'react-native-maps';
+import { Ionicons } from '@expo/vector-icons';
 import { useSessionStore } from '@/store/useSessionStore';
 import { MAP_CONSTANTS } from '@/constants/map';
 import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
@@ -36,12 +37,13 @@ export const DestinationMarker: React.FC = memo(() => {
         zIndex={20}
       >
         <View style={styles.wrapper}>
-          <View style={styles.pin}>
-            <Text style={styles.emoji}>🎯</Text>
-          </View>
           <View style={styles.label}>
             <Text style={styles.labelText} numberOfLines={1}>{name}</Text>
           </View>
+          <View style={styles.pin}>
+            <Ionicons name="flag" size={18} color="#fff" />
+          </View>
+          <View style={styles.stem} />
         </View>
       </Marker>
     </>
@@ -51,16 +53,22 @@ export const DestinationMarker: React.FC = memo(() => {
 const styles = StyleSheet.create({
   wrapper: { alignItems: 'center' },
   pin: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(59,130,246,0.2)',
-    borderWidth: 2, borderColor: '#3b82f6',
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: '#3b82f6',
+    borderWidth: 3, borderColor: '#fff',
     alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9, shadowRadius: 8, elevation: 8,
   },
-  emoji: { fontSize: 18 },
+  stem: {
+    width: 0, height: 0, marginTop: -2,
+    borderLeftWidth: 5, borderRightWidth: 5, borderTopWidth: 9,
+    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: '#fff',
+  },
   label: {
-    backgroundColor: '#1a1a24', borderRadius: 6,
-    paddingHorizontal: 8, paddingVertical: 3, marginTop: 4,
-    borderWidth: 1, borderColor: '#3b82f6', maxWidth: 140,
+    backgroundColor: 'rgba(10,10,16,0.9)', borderRadius: 8,
+    paddingHorizontal: 9, paddingVertical: 4, marginBottom: 4,
+    borderWidth: 1, borderColor: '#3b82f6', maxWidth: 160,
   },
-  labelText: { color: '#60a5fa', fontSize: 11, fontWeight: '600' },
+  labelText: { color: '#93c5fd', fontSize: 11, fontWeight: '700' },
 });

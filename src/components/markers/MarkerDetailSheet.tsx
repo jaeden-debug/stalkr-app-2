@@ -12,13 +12,15 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Sheet } from '@/components/ui/Sheet';
 import { CoordDisplay } from '@/components/ui/CoordDisplay';
+import { PhotoGallery } from '@/components/ui/PhotoGallery';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useToast } from '@/components/ui/Toast';
 import { getMarkerConfig } from '@/constants/markerTypes';
-import { updateMarker } from '@/services/markers';
+import { updateMarker, fetchMarkerPhotos, uploadMarkerPhoto } from '@/services/markers';
 import { logEvent } from '@/services/groupEvents';
 import { timeAgo } from '@/utils/time';
 
@@ -93,7 +95,7 @@ export const MarkerDetailSheet: React.FC<MarkerDetailSheetProps> = memo(
           {/* Type row */}
           <View style={styles.typeRow}>
             <View style={[styles.typeIcon, { backgroundColor: `${config.color}22` }]}>
-              <Text style={styles.emoji}>{config.emoji}</Text>
+              <Ionicons name={config.ionicon} size={22} color={config.color} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.typeLabel}>{config.label}</Text>
@@ -110,6 +112,14 @@ export const MarkerDetailSheet: React.FC<MarkerDetailSheetProps> = memo(
 
           {/* Coordinates */}
           <CoordDisplay latitude={marker.latitude} longitude={marker.longitude} />
+
+          {/* Photos */}
+          <PhotoGallery
+            reloadKey={marker.id}
+            canEdit={!!userId}
+            load={() => fetchMarkerPhotos(marker.id).then((ps) => ps.map((p) => ({ id: p.id, url: p.url })))}
+            upload={(uri) => uploadMarkerPhoto(marker.id, marker.group_id, userId!, uri).then((p) => (p ? { id: p.id, url: p.url } : null))}
+          />
 
           {/* Owner actions */}
           {isOwner && (

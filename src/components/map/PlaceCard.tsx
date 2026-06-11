@@ -17,7 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { useMapStore } from '@/store/useMapStore';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useSessionStore } from '@/store/useSessionStore';
-import { getDistance, formatDistance } from '@/utils/distance';
+import { getDistance, formatDistanceBoth } from '@/utils/distance';
 import { C } from '@/constants/theme';
 
 export const PlaceCard: React.FC = () => {
@@ -32,7 +32,7 @@ export const PlaceCard: React.FC = () => {
   if (!place) return null;
 
   const dist = myLocation
-    ? formatDistance(getDistance(myLocation, { latitude: place.latitude, longitude: place.longitude }))
+    ? formatDistanceBoth(getDistance(myLocation, { latitude: place.latitude, longitude: place.longitude }))
     : null;
 
   const requireCrew = (): boolean => {

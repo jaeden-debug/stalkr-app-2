@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '@/components/ui/Avatar';
 import { BatteryIndicator } from '@/components/ui/BatteryIndicator';
 import { formatHeading, formatSpeed } from '@/utils/heading';
-import { formatDistance } from '@/utils/distance';
+import { formatDistanceBoth } from '@/utils/distance';
 import { timeAgo } from '@/utils/time';
 import { C } from '@/constants/theme';
 
@@ -68,7 +68,7 @@ export const MemberCard: React.FC<MemberCardProps> = ({
               <Text style={[s.statusText, { color: statusColor }]}>{statusLabel}</Text>
             </View>
             {distanceM != null && (
-              <View style={s.metaPill}><Text style={s.metaPillText}>{formatDistance(distanceM)}</Text></View>
+              <View style={s.metaPill}><Text style={s.metaPillText}>{formatDistanceBoth(distanceM)}</Text></View>
             )}
           </View>
         </View>

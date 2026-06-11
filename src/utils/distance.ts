@@ -41,13 +41,27 @@ export function formatDistance(meters: number): string {
 }
 
 /**
- * Format distance in miles (for US users)
+ * Format distance in miles / feet (imperial)
  */
 export function formatDistanceMiles(meters: number): string {
   const miles = meters / 1609.344;
-  if (miles < 0.1) return `${Math.round(meters)}ft`;
+  if (miles < 0.1) return `${Math.round(meters * 3.28084)}ft`;
   if (miles < 10) return `${miles.toFixed(1)}mi`;
   return `${Math.round(miles)}mi`;
+}
+
+/**
+ * Format distance showing BOTH metric and imperial, e.g.
+ *   "150 m · 492 ft"  or  "1.2 km · 0.7 mi".
+ */
+export function formatDistanceBoth(meters: number): string {
+  const m = Math.max(0, meters);
+  const metric =
+    m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(m / 1000 < 10 ? 1 : 0)} km`;
+  const miles = m / 1609.344;
+  const imperial =
+    miles < 0.1 ? `${Math.round(m * 3.28084)} ft` : `${miles.toFixed(miles < 10 ? 1 : 0)} mi`;
+  return `${metric} · ${imperial}`;
 }
 
 /**

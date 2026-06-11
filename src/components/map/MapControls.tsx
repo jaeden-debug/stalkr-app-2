@@ -16,7 +16,7 @@ import React, { memo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMapStore } from '@/store/useMapStore';
-import { formatDistance } from '@/utils/distance';
+import { formatDistanceBoth } from '@/utils/distance';
 import { C } from '@/constants/theme';
 
 export const MapControls: React.FC = memo(() => {
@@ -51,7 +51,7 @@ export const MapControls: React.FC = memo(() => {
     bannerText = `TAP TO ADD POINT  ·  ${polygonDraftPoints.length} PLACED`;
     icon = 'git-network';
   } else if (placingCircle && circleDraft) {
-    bannerText = `DRAG TO SIZE  ·  ${formatDistance(circleDraft.radius)}`;
+    bannerText = `DRAG TO SIZE  ·  ${formatDistanceBoth(circleDraft.radius)}`;
     icon = 'radio-button-on';
   } else {
     bannerText = 'TAP MAP TO SET ZONE CENTRE';

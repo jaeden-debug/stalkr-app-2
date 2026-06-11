@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
@@ -50,7 +51,7 @@ export default function RegisterScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.brand}>
-          <Text style={styles.brandEmoji}>🎯</Text>
+          <View style={styles.logoMark}><Ionicons name="navigate" size={34} color="#22c55e" /></View>
           <Text style={styles.brandName}>Create Account</Text>
           <Text style={styles.brandTagline}>Join the crew</Text>
         </View>
@@ -61,7 +62,7 @@ export default function RegisterScreen() {
             <TextInput
               style={styles.input}
               placeholder="Your name or call sign"
-              placeholderTextColor="#5555aa"
+              placeholderTextColor="rgba(255,255,255,0.35)"
               value={displayName}
               onChangeText={setDisplayName}
               autoCapitalize="words"
@@ -74,7 +75,7 @@ export default function RegisterScreen() {
             <TextInput
               style={styles.input}
               placeholder="your@email.com"
-              placeholderTextColor="#5555aa"
+              placeholderTextColor="rgba(255,255,255,0.35)"
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -88,7 +89,7 @@ export default function RegisterScreen() {
             <TextInput
               style={styles.input}
               placeholder="6+ characters"
-              placeholderTextColor="#5555aa"
+              placeholderTextColor="rgba(255,255,255,0.35)"
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -117,16 +118,16 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0f' },
   container: { flexGrow: 1, padding: 24, justifyContent: 'center', gap: 32 },
   brand: { alignItems: 'center', gap: 8 },
-  brandEmoji: { fontSize: 56 },
+  logoMark: { width: 72, height: 72, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(34,197,94,0.12)', borderWidth: 1, borderColor: 'rgba(34,197,94,0.4)' },
   brandName: { color: '#e8e8f0', fontSize: 32, fontWeight: '800', letterSpacing: 1 },
   brandTagline: { color: '#8888aa', fontSize: 14 },
   form: { gap: 16 },
   fieldGroup: { gap: 6 },
   label: { color: '#8888aa', fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
   input: {
-    backgroundColor: '#1a1a24',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: '#2a2a3a',
+    borderColor: 'rgba(255,255,255,0.12)',
     borderRadius: 12,
     padding: 14,
     color: '#e8e8f0',

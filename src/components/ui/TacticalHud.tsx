@@ -26,7 +26,7 @@ import { useMapStore } from '@/store/useMapStore';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useHeading } from '@/hooks/useHeading';
-import { getDistance, formatDistance } from '@/utils/distance';
+import { getDistance, formatDistanceBoth } from '@/utils/distance';
 import { formatSpeed } from '@/utils/heading';
 import { C } from '@/constants/theme';
 import { buildWatchUrl } from '@/services/sessions';
@@ -168,7 +168,7 @@ export const TacticalHud: React.FC = () => {
       activeJourney.destination_latitude == null ||
       activeJourney.destination_longitude == null
     ) return null;
-    return formatDistance(getDistance(
+    return formatDistanceBoth(getDistance(
       { latitude: myLocation.latitude, longitude: myLocation.longitude },
       { latitude: activeJourney.destination_latitude, longitude: activeJourney.destination_longitude },
     ));

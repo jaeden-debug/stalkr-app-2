@@ -15,6 +15,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { getCrewColor } from '@/constants/map';
 import { getLocationStatus } from '@/utils/time';
 import { fetchGroupLiveLocations } from '@/services/liveLocations';
+import { normalizeSavedPlace } from '@/services/savedPlaces';
 import { sendLocalNotification } from '@/services/notifications';
 import { useCrewPrefsStore } from '@/store/useCrewPrefsStore';
 import { useNotifCenterStore } from '@/store/useNotifCenterStore';
@@ -129,7 +130,9 @@ export function useRealtimeGroup() {
             if (id) store.removeSavedPlaceFromStore(id);
           } else {
             const r = payload.new as any;
-            if (r?.id) store.upsertSavedPlaceInStore(r);
+            // Normalize: realtime can deliver lat/lng as strings + polygon_coords
+            // as a JSON string, which would make ZoneLayer drop the zone.
+            if (r?.id) store.upsertSavedPlaceInStore(normalizeSavedPlace(r));
           }
         },
       )
