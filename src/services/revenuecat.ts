@@ -33,7 +33,9 @@ export const revenueCatAvailable = () => !!Purchases;
 
 export async function configureRevenueCat(appUserId: string | null): Promise<void> {
   if (!Purchases) return;
-  const apiKey = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY;
+  // Accept either name — .env uses *_IOS_API_KEY; older docs referenced *_IOS_KEY.
+  const apiKey =
+    process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ?? process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY;
   if (!apiKey) return;
   try {
     if (!configured) {
