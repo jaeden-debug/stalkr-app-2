@@ -18,6 +18,7 @@ import { CoordDisplay } from '@/components/ui/CoordDisplay';
 import { PhotoGallery } from '@/components/ui/PhotoGallery';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useBillingStore } from '@/store/useBillingStore';
 import { useToast } from '@/components/ui/Toast';
 import { getMarkerConfig } from '@/constants/markerTypes';
 import { updateMarker, fetchMarkerPhotos, uploadMarkerPhoto } from '@/services/markers';
@@ -113,10 +114,10 @@ export const MarkerDetailSheet: React.FC<MarkerDetailSheetProps> = memo(
           {/* Coordinates */}
           <CoordDisplay latitude={marker.latitude} longitude={marker.longitude} />
 
-          {/* Photos */}
+          {/* Photos (adding is a paid feature) */}
           <PhotoGallery
             reloadKey={marker.id}
-            canEdit={!!userId}
+            canEdit={!!userId && useBillingStore.getState().hasFeature('markerPhotos')}
             load={() => fetchMarkerPhotos(marker.id).then((ps) => ps.map((p) => ({ id: p.id, url: p.url })))}
             upload={(uri) => uploadMarkerPhoto(marker.id, marker.group_id, userId!, uri).then((p) => (p ? { id: p.id, url: p.url } : null))}
           />

@@ -57,6 +57,7 @@ import { useAnalytics } from '@/hooks/useAnalytics';
 import { getLocationStatus } from '@/utils/time';
 import { buildWatchUrl } from '@/services/sessions';
 import { shareWithLink } from '@/utils/contactActions';
+import { requireFeature, requireLimit } from '@/utils/paywall';
 
 /** Public invite link — opens the app (universal link) or the web invite page. */
 const buildInviteUrl = (code: string) => `https://app.navtrl.com/invite/${code}`;
@@ -255,12 +256,16 @@ export const NavigationDrawer: React.FC = () => {
   }, [track]);
 
   const handleSelectZoneType = useCallback((type: 'circle' | 'polygon') => {
+    // Paywall: zones are a paid feature + limited per plan.
+    if (!requireFeature('polygonZones', router, 'Zones')) { setZoneModal(false); return; }
+    const zoneCount = useMapStore.getState().savedPlaces.length;
+    if (!requireLimit('maxSavedPlaces', zoneCount, router, 'zones')) { setZoneModal(false); return; }
     setZoneModal(false);
     sheetRef.current?.snapToIndex(0);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (type === 'circle') useMapStore.getState().startCircleZonePlacement();
     else useMapStore.getState().startPolygonZonePlacement();
-  }, []);
+  }, [router]);
 
   // ── Search bar → open the maps-style place search overlay ────────────────────
   const onSearchPress = useCallback(() => {
@@ -323,6 +328,8 @@ export const NavigationDrawer: React.FC = () => {
   const handleCreateCrew = useCallback(async () => {
     const name = crewName.trim();
     if (!name) { Alert.alert('CREW NAME REQUIRED', 'Name your crew before generating an invite.'); return; }
+    // Paywall: plan limits how many crews you can create.
+    if (!requireLimit('maxGroups', groups.length, router, 'crews')) return;
     setCreatingCrew(true);
     try {
       const group = await createGroup(name, 'custom', enforce);

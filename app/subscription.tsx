@@ -1,146 +1,174 @@
-import React from 'react';
-import { Linking, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useBillingStore } from '@/store/useBillingStore';
-import { getPlanFeatures } from '@/constants/plans';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import type { SubscriptionPlan } from '@/types/database';
 
-const PLAN_DISPLAY: Record<SubscriptionPlan, { label: string; color: string; tagline: string; price: string }> = {
-  free: { label: 'Free', color: '#8888aa', tagline: 'The basics, forever free.', price: 'Free' },
-  pro: { label: 'Pro', color: '#22c55e', tagline: 'Zones, trails, and advanced features.', price: '$4.99/mo' },
-  crew: { label: 'Crew', color: '#f59e0b', tagline: 'Full control for serious groups.', price: '$9.99/mo' },
-};
+const PRO_PRICE_FALLBACK = '$9.99/mo';
+
+const FREE_FEATURES = [
+  '2 crews · 5 members each',
+  '3 saved places',
+  'Live crew location',
+  '4h trail history',
+];
+
+const PRO_FEATURES = [
+  'Unlimited crews & members',
+  'Polygon safety zones + alerts',
+  'Live journeys & safe-arrival',
+  'Marker & zone photos',
+  'Emergency contacts + SOS',
+  'Dead-man switch & check-ins',
+  'Enforced tracking & admin controls',
+  '30-day trail history',
+];
 
 export default function SubscriptionScreen() {
   const router = useRouter();
-  const { plan } = useBillingStore();
+  const plan = useBillingStore((s) => s.plan);
+  const isAdmin = useBillingStore((s) => s.isAdmin);
+  const getPackages = useBillingStore((s) => s.getPackages);
+  const purchase = useBillingStore((s) => s.purchase);
+  const restore = useBillingStore((s) => s.restore);
 
-  const plans: SubscriptionPlan[] = ['free', 'pro', 'crew'];
+  const isPro = isAdmin || plan === 'pro' || plan === 'crew';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [pkg, setPkg] = useState<any>(null);
+  const [price, setPrice] = useState(PRO_PRICE_FALLBACK);
+  const [busy, setBusy] = useState<'buy' | 'restore' | null>(null);
 
-  const handleUpgrade = (targetPlan: SubscriptionPlan) => {
-    // On mobile, route to App Store / Google Play in-app purchase.
-    // For now, deep-link to App Store subscription management.
-    // In production this calls expo-in-app-purchases or react-native-purchases.
-    Linking.openURL('https://apps.apple.com/account/subscriptions').catch(() => {});
+  useEffect(() => {
+    getPackages().then((pkgs) => {
+      const p = pkgs?.[0];
+      if (p) {
+        setPkg(p);
+        const s = p.product?.priceString;
+        if (s) setPrice(`${s}/mo`);
+      }
+    }).catch(() => {});
+  }, [getPackages]);
+
+  const onBuy = async () => {
+    if (!pkg) {
+      Alert.alert('Almost ready', 'Subscriptions aren’t available yet on this build. Make sure you’re on a build with in-app purchases enabled.');
+      return;
+    }
+    setBusy('buy');
+    try {
+      const ok = await purchase(pkg);
+      if (ok) { Alert.alert('You’re Pro', 'Full access unlocked. Thank you!'); router.back(); }
+    } catch {
+      Alert.alert('Purchase failed', 'Something went wrong. Please try again.');
+    } finally { setBusy(null); }
   };
 
-  const handleRestore = () => {
-    Linking.openURL('https://apps.apple.com/account/subscriptions').catch(() => {});
+  const onRestore = async () => {
+    setBusy('restore');
+    try {
+      const ok = await restore();
+      Alert.alert(ok ? 'Restored' : 'Nothing to restore', ok ? 'Your Pro access is active.' : 'No previous purchases were found.');
+      if (ok) router.back();
+    } finally { setBusy(null); }
   };
 
   return (
-    <SafeAreaView style={styles.root}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.back}>‹ Back</Text>
+    <SafeAreaView style={s.root}>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Text style={s.back}>‹ Back</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>Plans</Text>
-        <View style={{ width: 60 }} />
+        <Text style={s.title}>STALKR PRO</Text>
+        <View style={{ width: 56 }} />
       </View>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.headline}>Choose Your Plan</Text>
-        <Text style={styles.subheadline}>
-          Stalkr grows with your crew. Upgrade anytime.
-        </Text>
 
-        {plans.map((p) => {
-          const display = PLAN_DISPLAY[p];
-          const features = getPlanFeatures(p);
-          const isCurrent = p === plan;
+      <ScrollView contentContainerStyle={s.content}>
+        <View style={s.hero}>
+          <View style={s.logoMark}><Ionicons name="shield-checkmark" size={30} color="#22c55e" /></View>
+          <Text style={s.headline}>Unlock everything</Text>
+          <Text style={s.sub}>One plan. Full access to every safety and tracking feature.</Text>
+        </View>
 
-          const featureLines = [
-            `${features.maxGroups >= 50 ? 'Unlimited' : features.maxGroups} groups`,
-            `Up to ${features.maxMembersPerGroup} members/group`,
-            `${features.maxSavedPlaces} saved zones`,
-            `${features.trailHistoryHours}h trail history`,
-            (features as any).polygonZones ? '✓ Polygon zones' : '✗ Polygon zones',
-            (features as any).zoneAlerts ? '✓ Zone alerts' : '✗ Zone alerts',
-            (features as any).emergencyContacts ? '✓ Emergency contacts' : '✗ Emergency contacts',
-          ].filter(Boolean) as string[];
-
-          return (
-            <View key={p} style={[styles.planCard, isCurrent && styles.planCardActive]}>
-              <View style={styles.planHeader}>
-                <Text style={[styles.planName, { color: display.color }]}>{display.label}</Text>
-                {isCurrent && <Badge label="Current" variant="live" dot />}
-                <Text style={styles.planPrice}>{display.price}</Text>
-              </View>
-              <Text style={styles.planTagline}>{display.tagline}</Text>
-
-              <View style={styles.featureList}>
-                {featureLines.map((f, i) => (
-                  <Text
-                    key={i}
-                    style={[styles.featureItem, f.startsWith('✗') && styles.featureDisabled]}
-                  >
-                    {f}
-                  </Text>
-                ))}
-              </View>
-
-              {p !== 'free' && !isCurrent && (
-                <Button
-                  label={`Get ${display.label} — ${display.price}`}
-                  variant="primary"
-                  onPress={() => handleUpgrade(p)}
-                  fullWidth
-                  size="md"
-                />
-              )}
-              {isCurrent && p !== 'free' && (
-                <Text style={styles.currentLabel}>✓ Your current plan</Text>
-              )}
+        {isPro ? (
+          <View style={[s.card, s.cardActive]}>
+            <View style={s.rowBetween}>
+              <Text style={s.cardName}>PRO</Text>
+              <View style={s.activePill}><Text style={s.activePillText}>{isAdmin ? 'ADMIN' : 'ACTIVE'}</Text></View>
             </View>
-          );
-        })}
+            <Text style={s.cardSub}>{isAdmin ? 'Admin account — full access.' : 'You have full access. Thank you!'}</Text>
+            {PRO_FEATURES.map((f) => (
+              <View key={f} style={s.featRow}><Ionicons name="checkmark-circle" size={16} color="#22c55e" /><Text style={s.feat}>{f}</Text></View>
+            ))}
+          </View>
+        ) : (
+          <>
+            {/* PRO card */}
+            <View style={[s.card, s.cardActive]}>
+              <View style={s.rowBetween}>
+                <Text style={[s.cardName, { color: '#22c55e' }]}>PRO</Text>
+                <Text style={s.price}>{price}</Text>
+              </View>
+              <Text style={s.cardSub}>Everything in Stalkr, unlocked.</Text>
+              {PRO_FEATURES.map((f) => (
+                <View key={f} style={s.featRow}><Ionicons name="checkmark-circle" size={16} color="#22c55e" /><Text style={s.feat}>{f}</Text></View>
+              ))}
+              <TouchableOpacity style={s.buyBtn} onPress={onBuy} disabled={busy !== null} activeOpacity={0.85}>
+                {busy === 'buy' ? <ActivityIndicator color="#04130a" /> : <Text style={s.buyText}>Go Pro — {price}</Text>}
+              </TouchableOpacity>
+            </View>
 
-        <TouchableOpacity style={styles.restoreBtn} onPress={handleRestore}>
-          <Text style={styles.restoreBtnText}>Restore Purchases</Text>
+            {/* FREE card */}
+            <View style={s.card}>
+              <View style={s.rowBetween}>
+                <Text style={s.cardName}>FREE</Text>
+                <View style={s.currentPill}><Text style={s.currentPillText}>CURRENT</Text></View>
+              </View>
+              <Text style={s.cardSub}>The basics, forever free.</Text>
+              {FREE_FEATURES.map((f) => (
+                <View key={f} style={s.featRow}><Ionicons name="ellipse" size={7} color="#6b7280" style={{ marginHorizontal: 5 }} /><Text style={s.featDim}>{f}</Text></View>
+              ))}
+            </View>
+          </>
+        )}
+
+        <TouchableOpacity style={s.restore} onPress={onRestore} disabled={busy !== null}>
+          <Text style={s.restoreText}>{busy === 'restore' ? 'Restoring…' : 'Restore purchases'}</Text>
         </TouchableOpacity>
-        <Text style={styles.legal}>
-          Subscriptions auto-renew. Cancel anytime in App Store / Google Play settings.
-          Prices may vary by region.
+        <Text style={s.legal}>
+          Billed monthly through your App Store account; auto-renews until cancelled.
+          Manage or cancel anytime in Settings. Terms at navtrl.com/terms.
         </Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0f' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a3a',
-  },
-  back: { color: '#22c55e', fontSize: 16, fontWeight: '600', width: 60 },
-  title: { color: '#e8e8f0', fontSize: 18, fontWeight: '700' },
-  content: { padding: 16, gap: 16 },
-  headline: { color: '#e8e8f0', fontSize: 26, fontWeight: '800', textAlign: 'center' },
-  subheadline: { color: '#8888aa', fontSize: 14, textAlign: 'center' },
-  planCard: {
-    backgroundColor: '#1a1a24',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#2a2a3a',
-    padding: 16,
-    gap: 12,
-  },
-  planCardActive: { borderColor: '#22c55e' },
-  planHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  planName: { fontSize: 20, fontWeight: '800' },
-  planPrice: { color: '#8888aa', fontSize: 14, marginLeft: 'auto' },
-  planTagline: { color: '#8888aa', fontSize: 13 },
-  featureList: { gap: 4 },
-  featureItem: { color: '#e8e8f0', fontSize: 13 },
-  featureDisabled: { color: '#4a4a60' },
-  currentLabel: { color: '#22c55e', fontSize: 13, fontWeight: '600', textAlign: 'center' },
-  restoreBtn: { paddingVertical: 12, alignItems: 'center' },
-  restoreBtnText: { color: '#22c55e', fontSize: 14, fontWeight: '600' },
-  legal: { color: '#5555aa', fontSize: 11, textAlign: 'center', lineHeight: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1f2937' },
+  back: { color: '#22c55e', fontSize: 16, fontWeight: '600', width: 56 },
+  title: { color: '#f8fafc', fontSize: 15, fontWeight: '900', letterSpacing: 2 },
+  content: { padding: 18, gap: 16 },
+  hero: { alignItems: 'center', gap: 10, paddingVertical: 8 },
+  logoMark: { width: 64, height: 64, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(34,197,94,0.12)', borderWidth: 1, borderColor: 'rgba(34,197,94,0.4)' },
+  headline: { color: '#f8fafc', fontSize: 26, fontWeight: '900' },
+  sub: { color: 'rgba(255,255,255,0.55)', fontSize: 14, textAlign: 'center', maxWidth: 300 },
+  card: { backgroundColor: '#12121a', borderRadius: 18, borderWidth: 1, borderColor: '#262633', padding: 18, gap: 10 },
+  cardActive: { borderColor: 'rgba(34,197,94,0.5)', backgroundColor: 'rgba(34,197,94,0.05)' },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  cardName: { color: '#f8fafc', fontSize: 18, fontWeight: '900', letterSpacing: 1 },
+  cardSub: { color: 'rgba(255,255,255,0.55)', fontSize: 13 },
+  price: { color: '#22c55e', fontSize: 18, fontWeight: '900' },
+  featRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  feat: { color: '#e7eaee', fontSize: 14 },
+  featDim: { color: 'rgba(255,255,255,0.6)', fontSize: 14 },
+  buyBtn: { marginTop: 8, backgroundColor: '#22c55e', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  buyText: { color: '#04130a', fontWeight: '900', fontSize: 15 },
+  activePill: { backgroundColor: '#22c55e', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  activePillText: { color: '#04130a', fontWeight: '900', fontSize: 11, letterSpacing: 1 },
+  currentPill: { backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  currentPillText: { color: 'rgba(255,255,255,0.6)', fontWeight: '800', fontSize: 11, letterSpacing: 1 },
+  restore: { paddingVertical: 12, alignItems: 'center' },
+  restoreText: { color: '#22c55e', fontSize: 14, fontWeight: '600' },
+  legal: { color: 'rgba(255,255,255,0.3)', fontSize: 11, textAlign: 'center', lineHeight: 16 },
 });

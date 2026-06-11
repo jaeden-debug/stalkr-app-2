@@ -18,6 +18,8 @@ import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useLocationStore } from '@/store/useLocationStore';
 import { useGroupStore } from '@/store/useGroupStore';
+import { useRouter } from 'expo-router';
+import { requireFeature } from '@/utils/paywall';
 import { fetchEmergencyContacts } from '@/services/emergencyContacts';
 import { getDistance, formatDistanceBoth } from '@/utils/distance';
 import { C } from '@/constants/theme';
@@ -34,6 +36,7 @@ export const JourneySheet: React.FC = () => {
   const close = useSessionStore((s) => s.closeJourneySheet);
   const startJourney = useSessionStore((s) => s.startJourney);
   const myLocation = useMapStore((s) => s.myLocation);
+  const router = useRouter();
 
   const [dest, setDest] = useState<Dest | null>(null);
   const [editingDest, setEditingDest] = useState(true);
@@ -123,6 +126,8 @@ export const JourneySheet: React.FC = () => {
 
   const doStart = async () => {
     if (!dest) { Alert.alert('Choose a destination', 'Search and select where you are heading.'); return; }
+    // Paywall: live journeys are a paid feature.
+    if (!requireFeature('journeyMode', router, 'Journeys')) { close(); return; }
     const go = async () => {
       setStarting(true);
       const session = await startJourney({

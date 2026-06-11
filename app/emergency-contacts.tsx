@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { requireFeature } from '@/utils/paywall';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
 import {
@@ -47,6 +48,7 @@ export default function EmergencyContactsScreen() {
   const handleAdd = async () => {
     if (!name.trim() || !phone.trim()) { toast.error('Enter name and phone number'); return; }
     if (!userId) return;
+    if (!requireFeature('emergencyContacts', router, 'Emergency contacts')) return;
     setAdding(true);
     const contact = await createEmergencyContact(userId, name.trim(), phone.trim());
     setAdding(false);

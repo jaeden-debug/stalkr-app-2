@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { requireFeature } from '@/utils/paywall';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadCrewAvatar } from '@/services/auth';
@@ -351,7 +352,7 @@ export default function CrewSettingsScreen() {
                   maxLength={40}
                 />
                 <Row label="Invite link enabled" sub="Allow joining with the code" value={inviteEnabled} onChange={setInviteEnabled} />
-                <Row label="Enforce tracking" sub="Members can't go dark in this crew" value={enforced} onChange={setEnforced} last />
+                <Row label="Enforce tracking" sub="Members can't go dark in this crew" value={enforced} onChange={(v: boolean) => { if (!v || requireFeature('enforcedTracking', router, 'Enforced tracking')) setEnforced(v); }} last />
                 <TouchableOpacity style={[s.saveBtn, savingMgmt && { opacity: 0.6 }]} onPress={handleSaveMgmt} disabled={savingMgmt} activeOpacity={0.85}>
                   <Text style={s.saveBtnText}>{savingMgmt ? 'SAVING...' : 'SAVE CREW SETTINGS'}</Text>
                 </TouchableOpacity>

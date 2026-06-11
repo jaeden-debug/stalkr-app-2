@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { PhotoGallery } from '@/components/ui/PhotoGallery';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useBillingStore } from '@/store/useBillingStore';
 import { useToast } from '@/components/ui/Toast';
 import { deleteSavedPlace, updateSavedPlace, fetchSavedPlacePhotos, uploadSavedPlacePhoto } from '@/services/savedPlaces';
 import { logEvent } from '@/services/groupEvents';
@@ -151,7 +152,7 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
         {/* Photos */}
         <PhotoGallery
           reloadKey={zone.id}
-          canEdit={!!userId}
+          canEdit={!!userId && useBillingStore.getState().hasFeature('markerPhotos')}
           load={() => fetchSavedPlacePhotos(zone.id).then((ps) => ps.map((p) => ({ id: p.id, url: p.url })))}
           upload={(uri) => uploadSavedPlacePhoto(zone.id, zone.group_id, userId!, uri).then((p) => (p ? { id: p.id, url: p.url } : null))}
         />
