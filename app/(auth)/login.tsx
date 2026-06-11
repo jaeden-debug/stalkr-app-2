@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -10,7 +11,6 @@ import {
   View,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
@@ -50,9 +50,7 @@ export default function LoginScreen() {
       >
         {/* Logo / branding */}
         <View style={styles.brand}>
-          <View style={styles.logoMark}>
-            <Ionicons name="navigate" size={34} color="#22c55e" />
-          </View>
+          <Image source={require('../../assets/stalkr-logo.png')} style={styles.logo} resizeMode="contain" />
           <Text style={styles.brandName}>{APP_CONFIG.name}</Text>
           <Text style={styles.brandTagline}>Real-time location awareness & safety</Text>
         </View>
@@ -88,6 +86,9 @@ export default function LoginScreen() {
               selectionColor="#22c55e"
             />
           </View>
+          <TouchableOpacity onPress={() => router.push('/(auth)/forgot-password')} style={styles.forgot}>
+            <Text style={styles.forgotText}>Forgot password?</Text>
+          </TouchableOpacity>
           <Button
             label="Sign In"
             onPress={handleLogin}
@@ -120,14 +121,9 @@ const styles = StyleSheet.create({
     gap: 32,
   },
   brand: { alignItems: 'center', gap: 10 },
-  logoMark: {
-    width: 72, height: 72, borderRadius: 22,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(34,197,94,0.12)',
-    borderWidth: 1, borderColor: 'rgba(34,197,94,0.4)',
-    shadowColor: '#22c55e', shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5, shadowRadius: 16,
-  },
+  logo: { width: 96, height: 96 },
+  forgot: { alignSelf: 'flex-end', paddingVertical: 4 },
+  forgotText: { color: '#22c55e', fontSize: 13, fontWeight: '600' },
   brandName: {
     color: '#f8fafc',
     fontSize: 34,

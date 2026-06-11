@@ -32,6 +32,22 @@ export async function signOut(): Promise<void> {
   await supabase.auth.signOut();
 }
 
+/** Send a password-reset email. The link deep-links back to stalkr://reset. */
+export async function resetPassword(email: string): Promise<AuthResult> {
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+    redirectTo: 'stalkr://reset',
+  });
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+/** Set a new password for the (recovery-authenticated) user. */
+export async function updatePassword(password: string): Promise<AuthResult> {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
 /** Permanently delete the signed-in user's account (App Store requirement). */
 export async function deleteAccount(): Promise<AuthResult> {
   const { error } = await supabase.rpc('delete_account');

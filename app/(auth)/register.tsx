@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -10,7 +11,6 @@ import {
   View,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
@@ -51,7 +51,7 @@ export default function RegisterScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.brand}>
-          <View style={styles.logoMark}><Ionicons name="navigate" size={34} color="#22c55e" /></View>
+          <Image source={require('../../assets/stalkr-logo.png')} style={styles.logo} resizeMode="contain" />
           <Text style={styles.brandName}>Create Account</Text>
           <Text style={styles.brandTagline}>Join the crew</Text>
         </View>
@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0f' },
   container: { flexGrow: 1, padding: 24, justifyContent: 'center', gap: 32 },
   brand: { alignItems: 'center', gap: 8 },
-  logoMark: { width: 72, height: 72, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(34,197,94,0.12)', borderWidth: 1, borderColor: 'rgba(34,197,94,0.4)' },
+  logo: { width: 88, height: 88 },
   brandName: { color: '#e8e8f0', fontSize: 32, fontWeight: '800', letterSpacing: 1 },
   brandTagline: { color: '#8888aa', fontSize: 14 },
   form: { gap: 16 },
