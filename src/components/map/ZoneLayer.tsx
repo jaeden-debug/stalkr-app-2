@@ -172,7 +172,10 @@ const ZoneLabelMarker: React.FC<ZoneLabelProps> = memo(
         coordinate={coordinate}
         anchor={{ x: 0.5, y: 0.5 }}
         tracksViewChanges={tracksViewChanges}
-        draggable
+        // Only draggable once "Move Zone" is chosen from the detail sheet.
+        // An always-draggable marker eats the tap on iOS, so the zone could not
+        // be opened. Gating drag behind move-mode restores tap-to-open.
+        draggable={isMoving}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         zIndex={active ? 999 : isSelected ? 12 : 11}

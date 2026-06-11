@@ -7,6 +7,8 @@ import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Marker } from 'react-native-maps';
 import { useMapStore } from '@/store/useMapStore';
+import { useLocationStore } from '@/store/useLocationStore';
+import { useGroupStore } from '@/store/useGroupStore';
 import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
 import { HeadingArrow } from './HeadingArrow';
 
@@ -17,11 +19,24 @@ interface SelfMarkerProps {
   heading: number;
 }
 
+const LIVE = '#22c55e';
+const DARK = '#6b7280';
+
 export const SelfMarker: React.FC<SelfMarkerProps> = memo(
   ({ userId, latitude, longitude, heading }) => {
-    // Re-snapshot briefly on mount and whenever position/heading meaningfully
-    // change, then settle static — prevents the marker rendering blank/invisible.
-    const tracksViewChanges = useTracksViewChanges([latitude, longitude, heading]);
+    // Reflect Go Dark for the ACTIVE crew (broadcasting is per-crew). Falls back
+    // to the global flag if this crew has no explicit override yet. Greys out the
+    // self marker so it matches how crew members see you when you're dark.
+    const activeGroupId = useGroupStore((s) => s.activeGroupId);
+    const isDark = useLocationStore((s) => {
+      const perCrew = activeGroupId ? s.groupBroadcastingStatus[activeGroupId] : undefined;
+      return perCrew !== undefined ? !perCrew : !s.isBroadcasting;
+    });
+    const color = isDark ? DARK : LIVE;
+
+    // Re-snapshot briefly on mount and whenever position/heading/dark-state
+    // meaningfully change, then settle static — prevents the marker rendering blank.
+    const tracksViewChanges = useTracksViewChanges([latitude, longitude, heading, isDark]);
 
     const handlePress = () => {
       useMapStore.getState().setSelectedMapUser({ userId, type: 'self' });
@@ -36,12 +51,11 @@ export const SelfMarker: React.FC<SelfMarkerProps> = memo(
         zIndex={100}
       >
         <View style={styles.wrapper}>
-          <HeadingArrow heading={heading} color="#22c55e" size={56} />
-          <View style={styles.marker}>
-            <View style={styles.ring} />
-            <View style={styles.inner}>
-              {/* Green "self" dot */}
-            </View>
+          {/* Heading arrow hidden while dark — you're not sharing direction. */}
+          {!isDark && <HeadingArrow heading={heading} color={color} size={56} />}
+          <View style={[styles.marker, { backgroundColor: color, shadowColor: color }, isDark && styles.markerDark]}>
+            <View style={[styles.ring, { borderColor: isDark ? 'rgba(107,114,128,0.4)' : 'rgba(34,197,94,0.35)' }]} />
+            <View style={styles.inner} />
           </View>
         </View>
       </Marker>
@@ -75,6 +89,10 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 8,
     position: 'absolute',
+  },
+  markerDark: {
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
   },
   ring: {
     position: 'absolute',

@@ -18,7 +18,12 @@ export async function createSavedPlace(insert: DbSavedPlaceInsert): Promise<Save
     .insert(insert)
     .select()
     .single();
-  if (error || !data) return null;
+  if (error || !data) {
+    // Surface the real cause (e.g. missing column / RLS) instead of silently
+    // returning null, which made zones "disappear" with no explanation.
+    console.error('createSavedPlace failed:', error?.message, error?.details, error?.code);
+    return null;
+  }
   return data as SavedPlace;
 }
 

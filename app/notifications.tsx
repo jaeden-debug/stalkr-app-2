@@ -128,18 +128,21 @@ export default function NotificationsScreen() {
         <TextInput style={s.search} value={query} onChangeText={setQuery} placeholder="Search notifications" placeholderTextColor="rgba(255,255,255,0.35)" selectionColor={C.green} />
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
-        {FILTERS.map((f) => (
-          <TouchableOpacity key={f} style={[s.chip, filter === f && s.chipActive]} onPress={() => setFilter(f)} activeOpacity={0.8}>
-            <Text style={[s.chipText, filter === f && s.chipTextActive]}>{f}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      <View style={s.chipsBar}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
+          {FILTERS.map((f) => (
+            <TouchableOpacity key={f} style={[s.chip, filter === f && s.chipActive]} onPress={() => setFilter(f)} activeOpacity={0.8}>
+              <Text style={[s.chipText, filter === f && s.chipTextActive]}>{f}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       <FlatList
         data={visible}
         keyExtractor={(e) => e.id}
         renderItem={renderItem}
+        style={{ flex: 1 }}
         contentContainerStyle={visible.length === 0 ? s.empty : s.list}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.green} />}
         ListEmptyComponent={!loading ? <EmptyState emoji="🔔" title="You're all caught up" subtitle="Crew alerts, zones, journeys, check-ins and SOS events show up here." /> : null}
@@ -156,7 +159,10 @@ const s = StyleSheet.create({
   markAll: { color: C.green, fontSize: 13, fontWeight: '800' },
   searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 14, height: 44, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
   search: { flex: 1, color: '#FFFFFF', fontSize: 14 },
-  chips: { paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
+  // Wrapper caps the horizontal chip row's height. Without it, a horizontal
+  // ScrollView in a flex column stretches vertically and the chips render squished.
+  chipsBar: { flexGrow: 0, flexShrink: 0 },
+  chips: { paddingHorizontal: 16, paddingVertical: 12, gap: 8, alignItems: 'center' },
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(255,255,255,0.05)' },
   chipActive: { borderColor: C.greenBorder, backgroundColor: C.greenDim },
   chipText: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '800' },

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { Marker, SavedPlace, MapCrewMember, SelectedMapUser, RallyPoint } from '@/types/models';
 import type { MarkerType, LatLng } from '@/types/database';
@@ -499,6 +500,12 @@ export const useMapStore = create<MapState>()(
           set((s) => ({ savedPlaces: [place, ...s.savedPlaces] }));
           logEvent(groupId, userId, 'zone_created', `Zone: ${place.name}`,
             `${type === 'polygon' ? 'Polygon' : 'Circle'} zone created.`).catch(() => {});
+        } else {
+          // Insert failed — tell the user instead of letting the zone vanish silently.
+          Alert.alert(
+            'Could not save zone',
+            "The zone couldn't be saved. Please check your connection and try again. If this keeps happening, the app database may need updating.",
+          );
         }
         return place;
       },

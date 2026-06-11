@@ -78,7 +78,11 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
       coordinate={{ latitude, longitude }}
       anchor={{ x: 0.5, y: 1 }}
       tracksViewChanges={tracksViewChanges}
-      draggable
+      // Only draggable once the user chooses "Move" from the detail sheet.
+      // An always-draggable marker swallows the tap gesture on iOS, so onPress
+      // never fires and the detail sheet can't open. Gating drag behind move-mode
+      // makes a normal tap reliably open the sheet.
+      draggable={menuMove}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onPress={() => {

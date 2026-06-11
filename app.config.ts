@@ -10,10 +10,10 @@ export default ({ config }: ConfigContext): any => ({
   slug: 'stalkr',
   version: '1.0.0',
   orientation: 'portrait',
-  icon: './assets/icon.png',
+  icon: './assets/icon-stalkr.png',
   userInterfaceStyle: 'dark',
   splash: {
-    image: './assets/splash.png',
+    image: './assets/splash-stalkr.png',
     resizeMode: 'contain',
     backgroundColor: '#080808',
   },
@@ -43,7 +43,7 @@ export default ({ config }: ConfigContext): any => ({
   },
   android: {
     adaptiveIcon: {
-      foregroundImage: './assets/icon-foreground.png',
+      foregroundImage: './assets/icon-stalkr-foreground.png',
       backgroundColor: '#080808',
     },
     package: ANDROID_PACKAGE,
