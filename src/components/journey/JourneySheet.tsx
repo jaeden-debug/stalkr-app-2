@@ -41,9 +41,6 @@ export const JourneySheet: React.FC = () => {
   const [starting, setStarting] = useState(false);
 
   const [emergency, setEmergency] = useState<EmergencyContact[]>([]);
-  const [contactPicker, setContactPicker] = useState(false);
-  const [phoneContacts, setPhoneContacts] = useState<{ id: string; name: string; value: string }[]>([]);
-  const [contactSearch, setContactSearch] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
   const [manualName, setManualName] = useState('');
   const [manualValue, setManualValue] = useState('');
@@ -75,23 +72,31 @@ export const JourneySheet: React.FC = () => {
   const removeWatcher = (key: string) => setWatchers((prev) => prev.filter((w) => w.key !== key));
 
   const openContacts = async () => {
-    const { status } = await Contacts.requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Contacts access', 'Allow contacts to quickly add watchers, or add them manually instead.');
+    // Use the NATIVE iOS/Android contact picker. A nested React Native <Modal>
+    // inside the JourneySheet modal silently fails to present on iOS (only one
+    // modal can be shown at a time), which is why "the contact sheet never opened."
+    // presentContactPickerAsync is presented by the OS and needs no permission.
+    try {
+      const contact = await Contacts.presentContactPickerAsync();
+      if (!contact) return;
+      const phone = contact.phoneNumbers?.[0]?.number ?? null;
+      const email = contact.emails?.[0]?.email ?? null;
+      if (!phone && !email) {
+        Alert.alert('No phone or email', `${contact.name ?? 'That contact'} has no phone number or email to send a watch link to. Add one manually instead.`);
+        setManualOpen(true);
+        return;
+      }
+      addWatcher({
+        key: `contact-${phone || email}`,
+        name: contact.name ?? 'Contact',
+        phone,
+        email: phone ? null : email,
+        source: 'contact',
+      });
+    } catch {
+      Alert.alert('Could not open contacts', 'Please add the contact manually instead.');
       setManualOpen(true);
-      return;
     }
-    const { data } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails] });
-    const cleaned = data
-      .map((c, i) => {
-        const value = c.phoneNumbers?.[0]?.number || c.emails?.[0]?.email || '';
-        return { id: String((c as any).id ?? i), name: c.name ?? 'Unknown', value };
-      })
-      .filter((c) => c.value)
-      .sort((a, b) => a.name.localeCompare(b.name));
-    setPhoneContacts(cleaned);
-    setContactSearch('');
-    setContactPicker(true);
   };
 
   const addManual = () => {
@@ -253,31 +258,6 @@ export const JourneySheet: React.FC = () => {
         </KeyboardAvoidingView>
       </View>
 
-      {/* Phone contact picker */}
-      <Modal visible={contactPicker} animationType="slide" onRequestClose={() => setContactPicker(false)}>
-        <SafeAreaView style={s.pickerRoot}>
-          <View style={s.pickerHeader}>
-            <Text style={s.pickerTitle}>ADD WATCHERS</Text>
-            <TouchableOpacity onPress={() => setContactPicker(false)}><Ionicons name="close-circle" size={28} color={C.green} /></TouchableOpacity>
-          </View>
-          <TextInput style={s.input} value={contactSearch} onChangeText={setContactSearch} placeholder="Search contacts" placeholderTextColor="rgba(255,255,255,0.3)" autoCapitalize="none" />
-          <ScrollView keyboardShouldPersistTaps="handled" style={{ flex: 1, marginTop: 10 }}>
-            {phoneContacts.filter((c) => !contactSearch.trim() || c.name.toLowerCase().includes(contactSearch.toLowerCase())).map((c) => {
-              const key = `ph-${c.id}`;
-              const added = watchers.some((w) => w.key === key);
-              const isEmail = c.value.includes('@');
-              return (
-                <TouchableOpacity key={c.id} style={[s.pickerRow, added && s.contactChipAdded]} onPress={() => added ? removeWatcher(key) : addWatcher({ key, name: c.name, phone: isEmail ? null : c.value, email: isEmail ? c.value : null, source: 'contact' })} activeOpacity={0.8}>
-                  <View style={s.watcherAvatar}><Text style={s.watcherInit}>{c.name.slice(0, 1).toUpperCase()}</Text></View>
-                  <View style={{ flex: 1 }}><Text style={s.watcherName}>{c.name}</Text><Text style={s.watcherMeta}>{c.value}</Text></View>
-                  {added && <Ionicons name="checkmark-circle" size={20} color={C.green} />}
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          <TouchableOpacity style={s.startBtn} onPress={() => setContactPicker(false)} activeOpacity={0.85}><Text style={s.startText}>DONE ({watchers.length})</Text></TouchableOpacity>
-        </SafeAreaView>
-      </Modal>
     </Modal>
   );
 };

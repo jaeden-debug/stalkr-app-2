@@ -114,7 +114,12 @@ export const MapContainer: React.FC = () => {
     : null;
 
   const handleMapPress = useCallback(
-    (e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) => {
+    (e: { nativeEvent: { action?: string; coordinate: { latitude: number; longitude: number } } }) => {
+      // When a marker/polygon is tapped, react-native-maps still fires the map's
+      // onPress with action 'marker-press'/'polygon-press'. Ignore those so we
+      // don't clear the selection the marker just set (which made sheets unopenable).
+      const action = e.nativeEvent?.action;
+      if (action === 'marker-press' || action === 'polygon-press' || action === 'callout-press') return;
       useMapStore.getState().handleMapTap(e.nativeEvent.coordinate);
     },
     [],

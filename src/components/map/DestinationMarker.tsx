@@ -6,13 +6,16 @@ import { MAP_CONSTANTS } from '@/constants/map';
 import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
 
 export const DestinationMarker: React.FC = memo(() => {
-  const activeSession = useSessionStore((s) => s.activeSession);
+  // Use the active JOURNEY session — that's what startJourney sets and what the
+  // arrival tracker (useLocationTracker) watches for auto-completion. Reading
+  // `activeSession` (group feed) left this null, so the marker never showed.
+  const journey = useSessionStore((s) => s.activeJourneySession ?? s.activeSession);
   const hasDestination =
-    activeSession?.destination_latitude != null && activeSession?.destination_longitude != null;
+    journey?.destination_latitude != null && journey?.destination_longitude != null;
 
-  const lat = activeSession?.destination_latitude ?? 0;
-  const lng = activeSession?.destination_longitude ?? 0;
-  const name = activeSession?.destination_name ?? 'Destination';
+  const lat = journey?.destination_latitude ?? 0;
+  const lng = journey?.destination_longitude ?? 0;
+  const name = journey?.destination_name ?? 'Destination';
   const tracksViewChanges = useTracksViewChanges([lat, lng, name]);
 
   if (!hasDestination) return null;

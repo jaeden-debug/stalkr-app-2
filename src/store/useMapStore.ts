@@ -46,6 +46,7 @@ interface MapState {
   selectedMarkerId: string | null;
   selectedFieldMarkerId: string | null; // alias for selectedMarkerId
   selectedSavedPlaceId: string | null;
+  lastSelectAt: number;
 
   // Markers
   markers: Marker[];
@@ -198,6 +199,10 @@ export const useMapStore = create<MapState>()(
       selectedMarkerId: null,
       selectedFieldMarkerId: null,
       selectedSavedPlaceId: null,
+      // Timestamp of the last marker/zone/self selection. The MapView's onPress
+      // can fire right after a marker's onPress (tap-through), which would clear
+      // the selection we just set. handleMapTap ignores deselect within ~350ms.
+      lastSelectAt: 0,
       markers: [],
       markersLoading: false,
       placingMarker: false,
@@ -283,6 +288,10 @@ export const useMapStore = create<MapState>()(
           }
           return;
         }
+        // Tap-through guard: react-native-maps can fire the MapView onPress right
+        // after a marker/zone/self onPress. Without this, tapping a marker would
+        // open its sheet and then immediately deselect it (sheet flashes closed).
+        if (Date.now() - get().lastSelectAt < 350) return;
         // Deselect everything
         set({ selectedMapUser: null, selectedMarkerId: null, selectedFieldMarkerId: null, selectedSavedPlaceId: null });
       },
@@ -307,10 +316,10 @@ export const useMapStore = create<MapState>()(
       setMyLocation: (loc) => set({ myLocation: loc }),
       goTo: (coords) => set((s) => ({ goToTarget: coords, goToTrigger: s.goToTrigger + 1 })),
 
-      setSelectedMapUser: (u) => set({ selectedMapUser: u }),
-      setSelectedMarkerId: (id) => set({ selectedMarkerId: id, selectedFieldMarkerId: id }),
-      setSelectedFieldMarkerId: (id) => set({ selectedFieldMarkerId: id, selectedMarkerId: id }),
-      setSelectedSavedPlaceId: (id) => set({ selectedSavedPlaceId: id }),
+      setSelectedMapUser: (u) => set({ selectedMapUser: u, lastSelectAt: u ? Date.now() : 0 }),
+      setSelectedMarkerId: (id) => set({ selectedMarkerId: id, selectedFieldMarkerId: id, lastSelectAt: id ? Date.now() : 0 }),
+      setSelectedFieldMarkerId: (id) => set({ selectedFieldMarkerId: id, selectedMarkerId: id, lastSelectAt: id ? Date.now() : 0 }),
+      setSelectedSavedPlaceId: (id) => set({ selectedSavedPlaceId: id, lastSelectAt: id ? Date.now() : 0 }),
 
       loadMarkers: async (groupId) => {
         const gid = groupId ?? useGroupStore.getState().activeGroupId;
