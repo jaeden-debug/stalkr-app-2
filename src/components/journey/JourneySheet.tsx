@@ -22,6 +22,7 @@ import { useRouter } from 'expo-router';
 import { requireFeature } from '@/utils/paywall';
 import { fetchEmergencyContacts } from '@/services/emergencyContacts';
 import { getDistance, formatDistanceBoth } from '@/utils/distance';
+import { cleanDeviceContacts, filterContacts, type DeviceContact } from '@/utils/contacts';
 import { C } from '@/constants/theme';
 import type { EmergencyContact } from '@/types/models';
 
@@ -51,7 +52,7 @@ export const JourneySheet: React.FC = () => {
   const [manualValue, setManualValue] = useState('');
   const [contactsOpen, setContactsOpen] = useState(false);
   const [contactsLoading, setContactsLoading] = useState(false);
-  const [phoneContacts, setPhoneContacts] = useState<{ id: string; name: string; value: string }[]>([]);
+  const [phoneContacts, setPhoneContacts] = useState<DeviceContact[]>([]);
   const [contactSearch, setContactSearch] = useState('');
 
   const placesRef = useRef<any>(null);
@@ -121,13 +122,7 @@ export const JourneySheet: React.FC = () => {
       const { data } = await Contacts.getContactsAsync({
         fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails],
       });
-      const cleaned = data
-        .map((c, i) => {
-          const value = c.phoneNumbers?.[0]?.number || c.emails?.[0]?.email || '';
-          return { id: String((c as any).id ?? i), name: c.name ?? 'Unknown', value };
-        })
-        .filter((c) => c.value)
-        .sort((a, b) => a.name.localeCompare(b.name));
+      const cleaned = cleanDeviceContacts(data as any);
       setPhoneContacts(cleaned);
       setContactSearch('');
       setContactsOpen(true);
@@ -318,13 +313,12 @@ export const JourneySheet: React.FC = () => {
                       placeholder="Search contacts" placeholderTextColor="rgba(255,255,255,0.3)" autoCapitalize="none"
                     />
                     <View style={s.contactsList}>
-                      {phoneContacts
-                        .filter((c) => !contactSearch.trim() || c.name.toLowerCase().includes(contactSearch.toLowerCase()))
+                      {filterContacts(phoneContacts, contactSearch)
                         .slice(0, 40)
                         .map((c) => {
                           const key = `ph-${c.id}`;
                           const added = watchers.some((w) => w.key === key);
-                          const isEmail = c.value.includes('@');
+                          const isEmail = c.isEmail;
                           return (
                             <TouchableOpacity
                               key={c.id}

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Contacts from 'expo-contacts';
+import { cleanDeviceContacts } from '@/utils/contacts';
 import { requireFeature } from '@/utils/paywall';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -71,14 +72,9 @@ export default function EmergencyContactsScreen() {
         return;
       }
       const { data } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.PhoneNumbers] });
-      const cleaned = data
-        .map((c, i) => ({
-          id: String((c as any).id ?? i),
-          name: c.name ?? 'Unknown',
-          phone: c.phoneNumbers?.[0]?.number ?? '',
-        }))
-        .filter((c) => c.phone)
-        .sort((a, b) => a.name.localeCompare(b.name));
+      const cleaned = cleanDeviceContacts(data as any)
+        .filter((c) => !c.isEmail) // emergency contacts must be a phone number (SOS texts)
+        .map((c) => ({ id: c.id, name: c.name, phone: c.value }));
       setPhoneContacts(cleaned);
       setSearch('');
       setPickerOpen(true);

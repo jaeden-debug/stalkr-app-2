@@ -996,14 +996,13 @@ export const NavigationDrawer: React.FC = () => {
             <Text style={[mod.title, { color: C.green }]}>CREATE ZONE</Text>
             <Text style={mod.sub}>Choose the zone shape.</Text>
             <View style={mod.zoneRow}>
-              {/* Circle zones temporarily disabled — coming soon. */}
-              <View style={[mod.zoneTile, { opacity: 0.45 }]}>
-                <View style={[mod.tileIcon, { borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.05)' }]}>
-                  <Ionicons name="radio-button-on" size={26} color="rgba(255,255,255,0.5)" />
+              <TouchableOpacity style={mod.zoneTile} onPress={() => handleSelectZoneType('circle')} activeOpacity={0.8}>
+                <View style={[mod.tileIcon, { borderColor: C.greenBorder, backgroundColor: C.greenDim }]}>
+                  <Ionicons name="radio-button-on" size={26} color={C.green} />
                 </View>
-                <Text style={[mod.tileLabel, { color: 'rgba(255,255,255,0.6)' }]}>CIRCLE</Text>
-                <Text style={mod.zoneSub}>Coming soon</Text>
-              </View>
+                <Text style={mod.tileLabel}>CIRCLE</Text>
+                <Text style={mod.zoneSub}>Tap, then drag to size</Text>
+              </TouchableOpacity>
               <TouchableOpacity style={mod.zoneTile} onPress={() => handleSelectZoneType('polygon')} activeOpacity={0.8}>
                 <View style={[mod.tileIcon, { borderColor: C.greenBorder, backgroundColor: C.greenDim }]}>
                   <Ionicons name="git-network" size={26} color={C.green} />

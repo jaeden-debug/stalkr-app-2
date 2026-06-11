@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useBillingStore } from '@/store/useBillingStore';
@@ -84,7 +84,7 @@ export default function SubscriptionScreen() {
 
       <ScrollView contentContainerStyle={s.content}>
         <View style={s.hero}>
-          <View style={s.logoMark}><Ionicons name="shield-checkmark" size={30} color="#22c55e" /></View>
+          <Image source={require('../assets/stalkr-logo.png')} style={s.logoMark} resizeMode="contain" />
           <Text style={s.headline}>Unlock everything</Text>
           <Text style={s.sub}>One plan. Full access to every safety and tracking feature.</Text>
         </View>
@@ -150,7 +150,7 @@ const s = StyleSheet.create({
   title: { color: '#f8fafc', fontSize: 15, fontWeight: '900', letterSpacing: 2 },
   content: { padding: 18, gap: 16 },
   hero: { alignItems: 'center', gap: 10, paddingVertical: 8 },
-  logoMark: { width: 64, height: 64, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(34,197,94,0.12)', borderWidth: 1, borderColor: 'rgba(34,197,94,0.4)' },
+  logoMark: { width: 76, height: 76, borderRadius: 20 },
   headline: { color: '#f8fafc', fontSize: 26, fontWeight: '900' },
   sub: { color: 'rgba(255,255,255,0.55)', fontSize: 14, textAlign: 'center', maxWidth: 300 },
   card: { backgroundColor: '#12121a', borderRadius: 18, borderWidth: 1, borderColor: '#262633', padding: 18, gap: 10 },

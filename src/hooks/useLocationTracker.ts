@@ -62,6 +62,11 @@ export function useLocationTracker() {
   const lastAccepted = useRef<{ lat: number; lng: number; acc: number; spd: number; t: number } | null>(null);
   const lastHeadingPoint = useRef<{ lat: number; lng: number } | null>(null);
   const lastStableHeading = useRef(0);
+  // Device-compass heading (where the top of the phone points) — drives the
+  // marker like Apple/Google Maps, in real time, independent of GPS movement.
+  const compassHeading = useRef<number | null>(null);
+  const headingSub = useRef<Location.LocationSubscription | null>(null);
+  const lastHeadingStoreUpdate = useRef(0);
   const lastLiveWritePerGroup = useRef<Record<string, number>>({});
   const offlineMarkedGroups = useRef<Set<string>>(new Set());
   const lastTrailWrite = useRef<{ lat: number; lng: number; t: number } | null>(null);
@@ -175,6 +180,29 @@ export function useLocationTracker() {
       if (status !== 'granted' || !mounted.current) return;
 
       globalWatchOwner = myInstanceId;
+
+      // ── Compass watch: rotate the self marker to the phone's facing direction
+      // in real time (like Apple/Google Maps). Fires far more often than the GPS
+      // watch and works while stationary, so the marker turns as you turn.
+      headingSub.current = await Location.watchHeadingAsync((h) => {
+        if (!mounted.current) return;
+        // trueHeading is relative to geographic north (map is north-up); it's -1
+        // until a location fix exists, so fall back to magnetic north.
+        const deg = h.trueHeading != null && h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+        if (!isFinite(deg)) return;
+        compassHeading.current = deg;
+
+        const now = Date.now();
+        if (now - lastHeadingStoreUpdate.current < 100) return; // ~10fps cap
+        const cur = useMapStore.getState().myLocation;
+        if (!cur) return;
+        // Only push when the angle actually moved (smallest signed diff ≥ 2°).
+        const diff = Math.abs(((deg - cur.heading + 540) % 360) - 180);
+        if (diff < 2) return;
+        lastHeadingStoreUpdate.current = now;
+        useMapStore.getState().setMyLocation({ ...cur, heading: deg });
+      });
+
       globalWatch = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.High, timeInterval: 4000, distanceInterval: 5 },
         async (loc) => {
@@ -198,15 +226,21 @@ export function useLocationTracker() {
             if (impliedSpd > MAX_SPEED_MPS && spd < 3) return;
           }
 
-          // Resolve heading
-          let resolvedHeading = heading ?? 0;
-          if ((resolvedHeading === 0 || resolvedHeading == null) && lastHeadingPoint.current) {
+          // Resolve heading — mirror Apple/Google Maps: the marker faces wherever
+          // the top of the phone points (compass). GPS course-over-ground is only
+          // a fallback for when the compass isn't available yet.
+          let resolvedHeading: number;
+          if (compassHeading.current != null) {
+            resolvedHeading = compassHeading.current;
+          } else if (heading != null && heading >= 0 && heading !== 0) {
+            resolvedHeading = heading;
+          } else if (lastHeadingPoint.current) {
             const moved = haversineMeters(lastHeadingPoint.current.lat, lastHeadingPoint.current.lng, latitude, longitude);
-            if (moved >= 2) {
-              resolvedHeading = calcBearing(lastHeadingPoint.current.lat, lastHeadingPoint.current.lng, latitude, longitude);
-            } else {
-              resolvedHeading = lastStableHeading.current;
-            }
+            resolvedHeading = moved >= 2
+              ? calcBearing(lastHeadingPoint.current.lat, lastHeadingPoint.current.lng, latitude, longitude)
+              : lastStableHeading.current;
+          } else {
+            resolvedHeading = heading ?? 0;
           }
           lastStableHeading.current = resolvedHeading;
           lastHeadingPoint.current = { lat: latitude, lng: longitude };
@@ -380,6 +414,8 @@ export function useLocationTracker() {
         globalWatch = null;
         globalWatchOwner = null;
       }
+      headingSub.current?.remove();
+      headingSub.current = null;
       if (broadcastChannel.current) {
         supabase.removeChannel(broadcastChannel.current);
         broadcastChannel.current = null;
