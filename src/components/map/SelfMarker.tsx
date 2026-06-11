@@ -47,7 +47,10 @@ export const SelfMarker: React.FC<SelfMarkerProps> = memo(
         coordinate={{ latitude, longitude }}
         anchor={{ x: 0.5, y: 0.5 }}
         tracksViewChanges={tracksViewChanges}
+        stopPropagation
+        // onPress (Android) + onSelect (iOS) for reliable taps.
         onPress={handlePress}
+        onSelect={handlePress}
         zIndex={100}
       >
         <View style={styles.wrapper}>

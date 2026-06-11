@@ -83,9 +83,17 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
       // never fires and the detail sheet can't open. Gating drag behind move-mode
       // makes a normal tap reliably open the sheet.
       draggable={menuMove}
+      // iOS (Apple Maps): stop the marker tap from bubbling to the MapView's
+      // onPress — that bubbling was clearing the selection (sheet flashed shut).
+      stopPropagation
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
+      // Two native tap events for reliability: onPress (Android) + onSelect (iOS).
+      // Both set the same id, so firing both is harmless.
       onPress={() => {
+        if (!isDragging) useMapStore.getState().setSelectedFieldMarkerId(markerId);
+      }}
+      onSelect={() => {
         if (!isDragging) useMapStore.getState().setSelectedFieldMarkerId(markerId);
       }}
       zIndex={isDragging ? 999 : isSelected ? 995 : 30}

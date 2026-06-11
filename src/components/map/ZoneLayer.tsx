@@ -176,10 +176,15 @@ const ZoneLabelMarker: React.FC<ZoneLabelProps> = memo(
         // An always-draggable marker eats the tap on iOS, so the zone could not
         // be opened. Gating drag behind move-mode restores tap-to-open.
         draggable={isMoving}
+        stopPropagation
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         zIndex={active ? 999 : isSelected ? 12 : 11}
+        // onPress (Android) + onSelect (iOS) for reliable taps on custom markers.
         onPress={() => {
+          if (!active) useMapStore.getState().setSelectedSavedPlaceId(zone.id);
+        }}
+        onSelect={() => {
           if (!active) useMapStore.getState().setSelectedSavedPlaceId(zone.id);
         }}
       >
