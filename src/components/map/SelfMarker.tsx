@@ -34,9 +34,9 @@ export const SelfMarker: React.FC<SelfMarkerProps> = memo(
     });
     const color = isDark ? DARK : LIVE;
 
-    // Re-snapshot briefly on mount and whenever position/heading/dark-state
-    // meaningfully change, then settle static — prevents the marker rendering blank.
-    const tracksViewChanges = useTracksViewChanges([latitude, longitude, heading, isDark]);
+    // Re-snapshot only on position / dark-state change — NOT heading. Rotation is
+    // applied natively via the Marker's `rotation` prop (smooth, no re-snapshot).
+    const tracksViewChanges = useTracksViewChanges([latitude, longitude, isDark]);
 
     const handlePress = () => {
       useMapStore.getState().setSelectedMapUser({ userId, type: 'self' });
@@ -47,6 +47,10 @@ export const SelfMarker: React.FC<SelfMarkerProps> = memo(
         coordinate={{ latitude, longitude }}
         anchor={{ x: 0.5, y: 0.5 }}
         tracksViewChanges={tracksViewChanges}
+        // flat + rotation = the marker rotates in MAP space (true bearing), so it
+        // stays correct even when the user rotates the map — like Apple/Google Maps.
+        flat
+        rotation={heading}
         stopPropagation
         // onPress (Android) + onSelect (iOS) for reliable taps.
         onPress={handlePress}
@@ -54,8 +58,8 @@ export const SelfMarker: React.FC<SelfMarkerProps> = memo(
         zIndex={100}
       >
         <View style={styles.wrapper}>
-          {/* Heading arrow hidden while dark — you're not sharing direction. */}
-          {!isDark && <HeadingArrow heading={heading} color={color} size={56} />}
+          {/* Arrow drawn pointing up; the Marker's rotation aims it at the bearing. */}
+          {!isDark && <HeadingArrow heading={0} color={color} size={56} />}
           <View style={[styles.marker, { backgroundColor: color, shadowColor: color }, isDark && styles.markerDark]}>
             <View style={[styles.ring, { borderColor: isDark ? 'rgba(107,114,128,0.4)' : 'rgba(34,197,94,0.35)' }]} />
             <View style={styles.inner} />
@@ -67,7 +71,8 @@ export const SelfMarker: React.FC<SelfMarkerProps> = memo(
   (prev, next) =>
     Math.abs(prev.latitude - next.latitude) < 0.000005 &&
     Math.abs(prev.longitude - next.longitude) < 0.000005 &&
-    Math.abs(prev.heading - next.heading) < 3,
+    // 1° threshold keeps the native rotation prop updating smoothly as you turn.
+    Math.abs(prev.heading - next.heading) < 1,
 );
 
 const styles = StyleSheet.create({

@@ -42,50 +42,69 @@ export const CrewMarker: React.FC<CrewMarkerProps> = memo(
     const statusColor =
       status === 'live' ? '#22c55e' : status === 'stale' ? '#f59e0b' : '#6b7280';
 
+    // Badge snapshot ignores heading (the badge never rotates). The directional
+    // arrow is a SEPARATE flat/rotated marker so the initials stay upright while
+    // the cone points at the true bearing — and map rotation doesn't tilt either.
     const tracksViewChanges = useTracksViewChanges([
       location.latitude,
       location.longitude,
-      location.heading,
       status,
       initials,
     ]);
+    const arrowTracks = useTracksViewChanges([status, color]);
 
     const handlePress = () => {
       useMapStore.getState().setSelectedMapUser({ userId: location.user_id, type: 'crew' });
     };
 
     return (
-      <Marker
-        coordinate={{ latitude: location.latitude, longitude: location.longitude }}
-        anchor={{ x: 0.5, y: 0.5 }}
-        tracksViewChanges={tracksViewChanges}
-        onPress={handlePress}
-        zIndex={50}
-      >
-        <View style={styles.wrapper}>
-          {status !== 'offline' && (
-            <HeadingArrow heading={location.heading} color={color} size={52} />
-          )}
-          <View
-            style={[
-              styles.marker,
-              {
-                borderColor: statusColor,
-                backgroundColor: `${color}22`,
-              },
-            ]}
+      <>
+        {/* Directional cone — flat on the map, rotated to the member's bearing. */}
+        {status !== 'offline' && (
+          <Marker
+            coordinate={{ latitude: location.latitude, longitude: location.longitude }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={arrowTracks}
+            flat
+            rotation={location.heading}
+            zIndex={49}
           >
-            <Text style={[styles.initials, { color }]}>{initials}</Text>
+            <View style={styles.arrowOnly}>
+              <HeadingArrow heading={0} color={color} size={52} />
+            </View>
+          </Marker>
+        )}
+
+        {/* Upright badge (initials) — billboard, never rotates. */}
+        <Marker
+          coordinate={{ latitude: location.latitude, longitude: location.longitude }}
+          anchor={{ x: 0.5, y: 0.5 }}
+          tracksViewChanges={tracksViewChanges}
+          onPress={handlePress}
+          zIndex={50}
+        >
+          <View style={styles.wrapper}>
+            <View
+              style={[
+                styles.marker,
+                {
+                  borderColor: statusColor,
+                  backgroundColor: `${color}22`,
+                },
+              ]}
+            >
+              <Text style={[styles.initials, { color }]}>{initials}</Text>
+            </View>
+            {/* Stale indicator */}
+            {status === 'stale' && (
+              <View style={[styles.statusDot, { backgroundColor: '#f59e0b' }]} />
+            )}
+            {status === 'offline' && (
+              <View style={[styles.statusDot, { backgroundColor: '#6b7280' }]} />
+            )}
           </View>
-          {/* Stale indicator */}
-          {status === 'stale' && (
-            <View style={[styles.statusDot, { backgroundColor: '#f59e0b' }]} />
-          )}
-          {status === 'offline' && (
-            <View style={[styles.statusDot, { backgroundColor: '#6b7280' }]} />
-          )}
-        </View>
-      </Marker>
+        </Marker>
+      </>
     );
   },
   (prev, next) =>
@@ -98,6 +117,12 @@ export const CrewMarker: React.FC<CrewMarkerProps> = memo(
 
 const styles = StyleSheet.create({
   wrapper: {
+    width: 52,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrowOnly: {
     width: 52,
     height: 52,
     alignItems: 'center',

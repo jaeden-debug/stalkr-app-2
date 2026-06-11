@@ -2,7 +2,7 @@ import '../global.css';
 import 'react-native-url-polyfill/auto';
 
 import { Stack, useNavigationContainerRef } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Sentry from '@sentry/react-native';
@@ -34,6 +34,9 @@ function RootLayoutInner() {
   // Bootstrap auth + billing on mount
   useEffect(() => {
     initialize().then(async () => {
+      // Re-derive plan/admin AFTER the session is restored, so admin@zylx.ai is
+      // recognized on a cold launch (no race with an empty session).
+      loadEntitlement();
       await loadGroups();
       const gid = useGroupStore.getState().activeGroupId;
       if (gid) loadGroupMembers(gid);
@@ -47,6 +50,32 @@ function RootLayoutInner() {
     });
     loadEntitlement();
   }, []);
+
+  // ── Account switch / sign-in / sign-out ─────────────────────────────────────
+  // The bootstrap effect above only runs once on mount, so when the signed-in
+  // user CHANGES at runtime we must purge the previous account's per-user state
+  // and reload fresh — otherwise the new account sees old crews and the admin /
+  // plan entitlement never refreshes (paywall stays on for admin@zylx.ai).
+  const prevUserId = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const uid = user?.id ?? null;
+    if (prevUserId.current === undefined) { prevUserId.current = uid; return; } // bootstrap handles first run
+    if (prevUserId.current === uid) return;
+    prevUserId.current = uid;
+
+    (async () => {
+      const { resetUserScopedState } = await import('@/store/resetUserScopedState');
+      await resetUserScopedState();
+      loadEntitlement(); // re-derive plan / admin for the new account
+      if (uid) {
+        await loadGroups();
+        const gid = useGroupStore.getState().activeGroupId;
+        if (gid) loadGroupMembers(gid);
+        useCrewPrefsStore.getState().hydrate(uid).catch(() => {});
+        useSafetyStore.getState().loadActive(uid).catch(() => {});
+      }
+    })();
+  }, [user?.id]);
 
   // Keep Sentry + PostHog identity in sync with auth state
   useEffect(() => {

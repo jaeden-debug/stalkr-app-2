@@ -87,18 +87,26 @@ export async function updateProfile(
 
 export async function uploadAvatar(userId: string, uri: string): Promise<string | null> {
   try {
-    const ext = uri.split('.').pop() ?? 'jpg';
+    const ext = (uri.split('.').pop() ?? 'jpg').toLowerCase().split('?')[0];
     const path = `avatars/${userId}.${ext}`;
     const response = await fetch(uri);
     const blob = await response.blob();
     const { error } = await supabase.storage.from('avatars').upload(path, blob, {
       upsert: true,
-      contentType: `image/${ext}`,
+      contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
     });
-    if (error) return null;
+    if (error) {
+      // Surface the real cause instead of a silent "Upload failed".
+      console.error('uploadAvatar failed:', error.message);
+      return null;
+    }
     const { data } = supabase.storage.from('avatars').getPublicUrl(path);
-    return data.publicUrl;
-  } catch {
+    // Cache-bust: the path is stable (avatars/<userId>.<ext>), so without a unique
+    // query param the CDN + RN image cache keep showing the OLD photo — which looks
+    // like "the picture won't change". The timestamp forces a fresh fetch.
+    return `${data.publicUrl}?v=${Date.now()}`;
+  } catch (e: any) {
+    console.error('uploadAvatar exception:', e?.message ?? e);
     return null;
   }
 }

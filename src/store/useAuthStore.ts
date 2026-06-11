@@ -135,6 +135,9 @@ export const useAuthStore = create<AuthState>()(
         if (userId) await authService.markOffline(userId).catch(() => {});
         await authService.signOut();
         set({ session: null, profile: null, user: null, error: null });
+        // Purge every per-user store so the next account starts clean (no leaked
+        // crews / zones / markers / plan). Lazy import avoids a circular dep.
+        try { await require('./resetUserScopedState').resetUserScopedState(); } catch {}
       },
 
       deleteAccount: async () => {

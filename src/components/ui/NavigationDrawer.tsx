@@ -46,6 +46,7 @@ import {
 import * as Contacts from 'expo-contacts';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { useGroupStore } from '@/store/useGroupStore';
+import { useBillingStore } from '@/store/useBillingStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useLocationStore } from '@/store/useLocationStore';
 import { useMapStore } from '@/store/useMapStore';
@@ -178,8 +179,10 @@ export const NavigationDrawer: React.FC = () => {
   const joinByInviteCode = useGroupStore((s) => s.joinByInviteCode);
   const loadGroupMembers = useGroupStore((s) => s.loadGroupMembers);
   const activeGroup = useMemo(() => groups.find((g) => g.id === activeGroupId) ?? null, [groups, activeGroupId]);
+  const isAppAdmin = useBillingStore((s) => s.isAdmin);
   const myRole = useMemo(() => groupMembers.find((m) => m.user_id === userId)?.role, [groupMembers, userId]);
-  const canContribute = can(myRole, 'contribute');
+  // App-admin (admin@zylx.ai) has unrestricted access — bypasses crew-role gating.
+  const canContribute = isAppAdmin || can(myRole, 'contribute');
 
   const isBroadcasting = useLocationStore((s) => s.isBroadcasting);
   const crewLocations  = useLocationStore((s) => s.crewLocations);
