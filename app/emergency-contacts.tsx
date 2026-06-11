@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as Contacts from 'expo-contacts';
 import { requireFeature } from '@/utils/paywall';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -36,6 +38,12 @@ export default function EmergencyContactsScreen() {
   const [phone, setPhone] = useState('');
   const [adding, setAdding] = useState(false);
 
+  // ── Device-contacts picker (inline — nested native pickers fail over a sheet on iOS)
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [phoneContacts, setPhoneContacts] = useState<{ id: string; name: string; phone: string }[]>([]);
+  const [search, setSearch] = useState('');
+
   useEffect(() => {
     if (userId) loadContacts();
   }, [userId]);
@@ -43,6 +51,48 @@ export default function EmergencyContactsScreen() {
   const loadContacts = async () => {
     if (!userId) return;
     setContacts(await fetchEmergencyContacts(userId));
+  };
+
+  const resetSheet = () => {
+    setShowAddSheet(false);
+    setPickerOpen(false);
+    setSearch('');
+    setName('');
+    setPhone('');
+  };
+
+  const openDevicePicker = async () => {
+    if (pickerOpen) { setPickerOpen(false); return; }
+    setPickerLoading(true);
+    try {
+      const { status } = await Contacts.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Contacts access', 'Allow contacts access in Settings to pick from your phone, or enter the contact manually.');
+        return;
+      }
+      const { data } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.PhoneNumbers] });
+      const cleaned = data
+        .map((c, i) => ({
+          id: String((c as any).id ?? i),
+          name: c.name ?? 'Unknown',
+          phone: c.phoneNumbers?.[0]?.number ?? '',
+        }))
+        .filter((c) => c.phone)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setPhoneContacts(cleaned);
+      setSearch('');
+      setPickerOpen(true);
+    } catch {
+      Alert.alert('Could not load contacts', 'Enter the contact manually instead.');
+    } finally {
+      setPickerLoading(false);
+    }
+  };
+
+  const pickContact = (c: { name: string; phone: string }) => {
+    setName(c.name);
+    setPhone(c.phone);
+    setPickerOpen(false);
   };
 
   const handleAdd = async () => {
@@ -125,29 +175,68 @@ export default function EmergencyContactsScreen() {
         }
       />
 
-      <Sheet visible={showAddSheet} onClose={() => setShowAddSheet(false)} title="Add Contact" snapHeight={320}>
+      <Sheet visible={showAddSheet} onClose={resetSheet} title="Add Contact" snapHeight={pickerOpen ? 520 : 380}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.sheetContent}>
-          <TextInput
-            style={s.input}
-            placeholder="Contact name"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            value={name}
-            onChangeText={setName}
-            autoFocus
-            selectionColor={C.green}
-          />
-          <TextInput
-            style={s.input}
-            placeholder="Phone number"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-            selectionColor={C.green}
-          />
-          <TouchableOpacity style={[s.addBtn, adding && { opacity: 0.6 }]} onPress={handleAdd} disabled={adding} activeOpacity={0.85}>
-            <Text style={s.addBtnText}>{adding ? 'ADDING...' : 'ADD CONTACT'}</Text>
+          {/* Pick from phone */}
+          <TouchableOpacity style={s.pickBtn} onPress={openDevicePicker} activeOpacity={0.85} disabled={pickerLoading}>
+            <Ionicons name="people" size={18} color={C.green} />
+            <Text style={s.pickBtnText}>
+              {pickerLoading ? 'Loading contacts…' : pickerOpen ? 'Hide phone contacts' : 'Choose from Contacts'}
+            </Text>
+            <Ionicons name={pickerOpen ? 'chevron-up' : 'chevron-down'} size={16} color="rgba(255,255,255,0.4)" />
           </TouchableOpacity>
+
+          {pickerOpen ? (
+            <View style={s.pickerWrap}>
+              <TextInput
+                style={s.input}
+                placeholder="Search contacts"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={search}
+                onChangeText={setSearch}
+                autoCapitalize="none"
+                selectionColor={C.green}
+              />
+              <ScrollView style={s.pickerList} keyboardShouldPersistTaps="handled">
+                {phoneContacts
+                  .filter((c) => c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search))
+                  .slice(0, 100)
+                  .map((c) => (
+                    <TouchableOpacity key={c.id} style={s.pickRow} onPress={() => pickContact(c)} activeOpacity={0.7}>
+                      <View style={s.pickAvatar}><Text style={s.pickInitial}>{(c.name[0] ?? '?').toUpperCase()}</Text></View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.pickName} numberOfLines={1}>{c.name}</Text>
+                        <Text style={s.pickPhone} numberOfLines={1}>{c.phone}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                {phoneContacts.length === 0 && <Text style={s.pickEmpty}>No contacts with a phone number found.</Text>}
+              </ScrollView>
+            </View>
+          ) : (
+            <>
+              <TextInput
+                style={s.input}
+                placeholder="Contact name"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={name}
+                onChangeText={setName}
+                selectionColor={C.green}
+              />
+              <TextInput
+                style={s.input}
+                placeholder="Phone number"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+                selectionColor={C.green}
+              />
+              <TouchableOpacity style={[s.addBtn, adding && { opacity: 0.6 }]} onPress={handleAdd} disabled={adding} activeOpacity={0.85}>
+                <Text style={s.addBtnText}>{adding ? 'ADDING...' : 'ADD CONTACT'}</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </KeyboardAvoidingView>
       </Sheet>
     </SafeAreaView>
@@ -193,4 +282,21 @@ const s = StyleSheet.create({
   },
   addBtn: { backgroundColor: C.green, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 4 },
   addBtnText: { color: '#000', fontWeight: '900', fontSize: 13, letterSpacing: 1 },
+  pickBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: C.greenDim, borderWidth: 1, borderColor: C.green,
+    borderRadius: 14, paddingHorizontal: 14, height: 52,
+  },
+  pickBtnText: { flex: 1, color: C.green, fontSize: 14, fontWeight: '800', letterSpacing: 0.3 },
+  pickerWrap: { gap: 10, flex: 1 },
+  pickerList: { maxHeight: 300 },
+  pickRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  pickAvatar: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: C.surface,
+    borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center',
+  },
+  pickInitial: { color: C.green, fontSize: 16, fontWeight: '800' },
+  pickName: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+  pickPhone: { color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 2 },
+  pickEmpty: { color: 'rgba(255,255,255,0.5)', fontSize: 13, textAlign: 'center', paddingVertical: 20 },
 });

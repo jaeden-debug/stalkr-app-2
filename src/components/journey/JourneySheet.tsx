@@ -5,7 +5,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView,
+  ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -85,12 +85,37 @@ export const JourneySheet: React.FC = () => {
     // nested Modal, no native picker — both fail to present over the journey
     // Modal on iOS). Toggle closed if already open.
     if (contactsOpen) { setContactsOpen(false); return; }
+
+    // The native module is only present in a real dev/production build — if the
+    // app was launched from an older binary (before expo-contacts was added),
+    // requestPermissionsAsync won't exist. Tell the user plainly to rebuild.
+    if (typeof Contacts.requestPermissionsAsync !== 'function') {
+      Alert.alert(
+        'Contacts unavailable',
+        'Phone-contact import needs the latest app build. Rebuild the app, or add the watcher manually for now.',
+      );
+      setManualOpen(true);
+      return;
+    }
+
     setContactsLoading(true);
     try {
-      const { status } = await Contacts.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Contacts access', 'Allow contacts in Settings to pick from them, or add one manually.');
-        setManualOpen(true);
+      const perm = await Contacts.requestPermissionsAsync();
+      if (perm.status !== 'granted') {
+        // Denied for good — the OS won't prompt again, so deep-link to Settings.
+        if (perm.canAskAgain === false) {
+          Alert.alert(
+            'Contacts access is off',
+            'Stalkr is blocked from reading your contacts. Turn it on in Settings, or add the watcher manually.',
+            [
+              { text: 'Add manually', style: 'cancel', onPress: () => setManualOpen(true) },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ],
+          );
+        } else {
+          Alert.alert('Contacts access needed', 'Allow contacts to pick from your phone, or add the watcher manually.');
+          setManualOpen(true);
+        }
         return;
       }
       const { data } = await Contacts.getContactsAsync({
@@ -106,8 +131,20 @@ export const JourneySheet: React.FC = () => {
       setPhoneContacts(cleaned);
       setContactSearch('');
       setContactsOpen(true);
-    } catch {
-      Alert.alert('Could not load contacts', 'Add the contact manually instead.');
+      // Granted, but nothing came back — usually iOS "Limited" access with no
+      // contacts selected. Point the user to fix it rather than show a blank list.
+      if (cleaned.length === 0) {
+        Alert.alert(
+          'No contacts available',
+          'No contacts were shared with Stalkr. If you chose "Limited Access", tap "Open Settings" to allow more, or add the watcher manually.',
+          [
+            { text: 'Add manually', style: 'cancel', onPress: () => setManualOpen(true) },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ],
+        );
+      }
+    } catch (e) {
+      Alert.alert('Could not load contacts', 'Something went wrong reading your contacts. Add the watcher manually instead.');
       setManualOpen(true);
     } finally {
       setContactsLoading(false);

@@ -137,6 +137,8 @@ export default function SettingsScreen() {
           <Row icon="person" label="EDIT PROFILE" sub="Name, photo, call sign" onPress={() => router.push('/profile')} />
           <View style={s.sep} />
           <Row icon="call" label="EMERGENCY CONTACTS" sub="Who to alert in an SOS" onPress={() => router.push('/emergency-contacts')} />
+          <View style={s.sep} />
+          <Row icon="key" label="CHANGE PASSWORD" sub="Update your account password" onPress={() => router.push('/change-password')} />
         </Section>
 
         <Section title="SUBSCRIPTION">
