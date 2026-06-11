@@ -16,6 +16,8 @@ import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplet
 import { useSessionStore, type JourneyWatcher } from '@/store/useSessionStore';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useLocationStore } from '@/store/useLocationStore';
+import { useGroupStore } from '@/store/useGroupStore';
 import { fetchEmergencyContacts } from '@/services/emergencyContacts';
 import { getDistance, formatDistanceBoth } from '@/utils/distance';
 import { C } from '@/constants/theme';
@@ -130,12 +132,36 @@ export const JourneySheet: React.FC = () => {
       setStarting(false);
       if (!session) Alert.alert('Could not start', 'Something went wrong starting your journey. Please try again.');
     };
-    if (watchers.length === 0) {
-      Alert.alert('No watchers selected', 'Start without sharing to anyone? You can still share the link later.', [
-        { text: 'Add watchers', style: 'cancel' },
-        { text: 'Start anyway', onPress: go },
-      ]);
-    } else { go(); }
+    const proceed = () => {
+      if (watchers.length === 0) {
+        Alert.alert('No watchers selected', 'Start without sharing to anyone? You can still share the link later.', [
+          { text: 'Add watchers', style: 'cancel' },
+          { text: 'Start anyway', onPress: go },
+        ]);
+      } else { go(); }
+    };
+    // A journey shares your LIVE location — you must be broadcasting. If you're
+    // dark, offer to go live and start in one tap.
+    if (!useLocationStore.getState().isBroadcasting) {
+      Alert.alert(
+        'Broadcast to start a journey',
+        'Stalkr needs to broadcast your location to share a live journey. Go live and start?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Go live & start',
+            onPress: () => {
+              const gid = useGroupStore.getState().activeGroupId;
+              useLocationStore.getState().setIsBroadcasting(true);
+              if (gid) useLocationStore.getState().setGroupBroadcasting(gid, true);
+              proceed();
+            },
+          },
+        ],
+      );
+      return;
+    }
+    proceed();
   };
 
   return (

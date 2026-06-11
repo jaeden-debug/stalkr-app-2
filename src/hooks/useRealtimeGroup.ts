@@ -23,7 +23,7 @@ import type { MapCrewMember } from '@/types/models';
 
 // Crew event types that should surface as a local alert when they arrive live.
 const ALERT_EVENTS = new Set([
-  'sos_triggered', 'deadman_triggered', 'checkin_timer_missed', 'arrival', 'member_offline',
+  'sos_triggered', 'deadman_triggered', 'checkin_timer_missed', 'arrival', 'member_offline', 'member_online',
 ]);
 
 function isUuid(v: string | null | undefined): v is string {

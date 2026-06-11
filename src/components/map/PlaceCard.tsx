@@ -93,10 +93,7 @@ export const PlaceCard: React.FC = () => {
         </TouchableOpacity>
 
         <View style={s.secondaryRow}>
-          <TouchableOpacity style={s.secondaryBtn} onPress={handleSaveZone} activeOpacity={0.85}>
-            <Ionicons name="scan" size={15} color={C.green} />
-            <Text style={s.secondaryText}>SAVE ZONE</Text>
-          </TouchableOpacity>
+          {/* SAVE ZONE removed for now — circle zones are disabled (coming soon). */}
           <TouchableOpacity style={s.secondaryBtn} onPress={handleDropMarker} activeOpacity={0.85}>
             <Ionicons name="pin" size={15} color={C.green} />
             <Text style={s.secondaryText}>DROP MARKER</Text>

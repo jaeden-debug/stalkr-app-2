@@ -21,6 +21,8 @@ import { Alert } from 'react-native';
 import { useLocationStore } from '@/store/useLocationStore';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { logEvent } from '@/services/groupEvents';
+import { sendLocalNotification } from '@/services/notifications';
 
 export function useGoDark() {
   const isBroadcasting = useLocationStore((s) => s.isBroadcasting);
@@ -31,16 +33,15 @@ export function useGoDark() {
   const groups = useGroupStore((s) => s.groups);
   const groupMembers = useGroupStore((s) => s.groupMembers);
   const userId = useAuthStore((s) => s.user?.id);
+  const profile = useAuthStore((s) => s.profile);
 
   const [isLoading, setIsLoading] = useState(false);
 
   const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null;
 
-  // Determine if tracking is enforced for this user
-  const myMember = groupMembers.find((m) => m.user_id === userId);
-  const myRole = myMember?.role ?? activeGroup?.member_role ?? 'member';
-  const isEnforced =
-    activeGroup?.tracking_mode === 'enforced' && myRole !== 'owner';
+  // Enforced tracking applies to EVERYONE in the crew — including the owner.
+  // (The owner turns enforcement off in crew settings, not via go-dark.)
+  const isEnforced = activeGroup?.tracking_mode === 'enforced';
 
   const isDark = !isBroadcasting;
 
@@ -53,7 +54,7 @@ export function useGoDark() {
     if (isEnforced) {
       Alert.alert(
         'TRACKING ENFORCED',
-        'Tracking is enforced by this crew owner. You cannot go dark.',
+        'This crew enforces tracking — everyone stays live, including the owner. Turn off enforced tracking in crew settings to allow Go Dark.',
       );
       return;
     }
@@ -63,14 +64,28 @@ export function useGoDark() {
       const newVal = !isBroadcasting;
       // Flip — useLocationTracker handles the Supabase write automatically
       setIsBroadcasting(newVal);
-      // Persist per-group state
-      if (activeGroupId) {
-        setGroupBroadcasting(activeGroupId, newVal);
+      if (activeGroupId) setGroupBroadcasting(activeGroupId, newVal);
+
+      // Notify the crew (realtime group_events) + a confirmation to yourself.
+      const name = profile?.nickname || profile?.display_name || 'A crew member';
+      if (userId) {
+        logEvent(
+          activeGroupId,
+          userId,
+          newVal ? 'member_online' : 'member_offline',
+          newVal ? `${name} started broadcasting` : `${name} stopped broadcasting`,
+          undefined,
+        ).catch(() => {});
       }
+      sendLocalNotification(
+        newVal ? 'You went live' : 'You went dark',
+        newVal ? 'You are now broadcasting your location to this crew.' : 'You stopped broadcasting your location to this crew.',
+        { type: 'general' },
+      ).catch(() => {});
     } finally {
       setIsLoading(false);
     }
-  }, [activeGroupId, isBroadcasting, isEnforced, setIsBroadcasting, setGroupBroadcasting]);
+  }, [activeGroupId, isBroadcasting, isEnforced, setIsBroadcasting, setGroupBroadcasting, profile, userId]);
 
   return { isDark, isEnforced, isLoading, toggle };
 }

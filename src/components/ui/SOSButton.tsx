@@ -19,6 +19,7 @@ import {
   View,
 } from 'react-native';
 import { LongPressGestureHandler, State } from 'react-native-gesture-handler';
+import * as Haptics from 'expo-haptics';
 import { useSOSMode } from '@/hooks/useSOSMode';
 import { FEATURES } from '@/config/features';
 
@@ -89,10 +90,27 @@ export const SOSButton: React.FC = () => {
     holdAnim.current.start(({ finished }) => {
       if (finished) {
         setHolding(false);
-        setSosActive(true);
         progress.setValue(0);
-        triggerSOS();
-        startActiveLoop();
+        // ALWAYS confirm before activating — SOS was being tripped accidentally.
+        // Strong warning haptic + an explicit confirm dialog.
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        Alert.alert(
+          'Send SOS?',
+          'This alerts your crew and emergency contacts with your live location.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => idleLoop.current?.start() },
+            {
+              text: 'Send SOS',
+              style: 'destructive',
+              onPress: () => {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                setSosActive(true);
+                triggerSOS();
+                startActiveLoop();
+              },
+            },
+          ],
+        );
       }
     });
   }, [cooldown, sosActive, triggerSOS, progress, startActiveLoop]);
