@@ -2,6 +2,27 @@ import { supabase } from './supabase';
 import type { Group, GroupMember } from '@/types/models';
 import type { DbGroupInsert, DbGroupUpdate, DbGroupMemberUpdate } from '@/types/database';
 
+/**
+ * Re-attach the caller as owner of any crew they created that has no members.
+ *
+ * The pre-016 non-atomic create path could leave a groups row with no
+ * membership. Those are invisible (fetchMyGroups reads THROUGH group_members)
+ * and undeletable (groups_delete needs is_group_owner, false with no members).
+ * Recovering ownership makes them reappear so the normal delete flow works,
+ * rather than deleting anyone's data for them.
+ *
+ * Narrow by design: only crews you created, only ones with zero members.
+ * Idempotent — returns 0 when there is nothing to recover.
+ */
+export async function reclaimOrphanedCrews(): Promise<number> {
+  const { data, error } = await supabase.rpc('reclaim_orphaned_crews');
+  if (error) {
+    console.error('[groups] reclaim_orphaned_crews failed:', error.message, error.code);
+    return 0;
+  }
+  return typeof data === 'number' ? data : 0;
+}
+
 export async function fetchMyGroups(userId: string): Promise<Group[]> {
   const { data, error } = await supabase
     .from('group_members')

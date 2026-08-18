@@ -56,6 +56,15 @@ export const useGroupStore = create<GroupState>()(
     const userId = useAuthStore.getState().session?.user?.id;
     if (!userId) return;
     set({ isLoading: true, error: null });
+
+    // Recover any crew this user created that lost its membership row, so it
+    // becomes visible and deletable again. Idempotent and a no-op for everyone
+    // who has none, so it is safe to run on every load.
+    const reclaimed = await groupService.reclaimOrphanedCrews();
+    if (reclaimed > 0) {
+      console.log(`[groups] recovered ${reclaimed} orphaned crew(s)`);
+    }
+
     const groups = await groupService.fetchMyGroups(userId);
     set({ groups, isLoading: false });
 

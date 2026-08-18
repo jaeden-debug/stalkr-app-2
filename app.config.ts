@@ -125,6 +125,21 @@ export default ({ config }: ConfigContext): any => ({
       },
     ],
     [
+      // Uploads JS source maps to Sentry during EAS Build so production stack
+      // traces resolve to real files and line numbers instead of minified
+      // Hermes bytecode. Without this plugin an incident report points at
+      // `index.android.bundle:1:284531`, which is useless for debugging.
+      //
+      // Needs SENTRY_AUTH_TOKEN in the EAS build environment (secret — NEVER
+      // EXPO_PUBLIC_, which would inline it into the shipped bundle).
+      '@sentry/react-native/expo',
+      {
+        url: 'https://sentry.io/',
+        organization: process.env.SENTRY_ORG ?? 'stillawake-media',
+        project: process.env.SENTRY_PROJECT ?? 'stalkr',
+      },
+    ],
+    [
       'expo-build-properties',
       {
         ios: {
