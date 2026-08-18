@@ -26,6 +26,7 @@ jest.mock('@/services/groups', () => ({
   deleteGroup: jest.fn(async () => true),
   updateGroup: jest.fn(async () => true),
   fetchMyGroups: jest.fn(async () => []),
+  reclaimOrphanedCrews: jest.fn(async () => 0),
   fetchGroupMembers: jest.fn(async () => []),
   updateGroupMember: jest.fn(async () => true),
   removeGroupMember: jest.fn(async () => true),
@@ -178,6 +179,31 @@ describe('leaving a crew', () => {
     await useGroupStore.getState().leaveGroup('g1');
 
     expect(useGroupStore.getState().activeGroupId).toBeNull();
+  });
+});
+
+describe('orphaned crew recovery', () => {
+  it('runs on every load so a lost crew becomes visible and deletable again', async () => {
+    // Orphans are invisible (fetchMyGroups reads THROUGH group_members) and
+    // undeletable (groups_delete needs is_group_owner). Reclaiming ownership is
+    // what makes the normal delete flow reachable.
+    groupService.reclaimOrphanedCrews.mockResolvedValue(2);
+    groupService.fetchMyGroups.mockResolvedValue([crew('g1'), crew('g2')]);
+
+    await useGroupStore.getState().loadGroups();
+
+    expect(groupService.reclaimOrphanedCrews).toHaveBeenCalledTimes(1);
+    expect(useGroupStore.getState().groups).toHaveLength(2);
+  });
+
+  it('is a harmless no-op when there is nothing to recover', async () => {
+    groupService.reclaimOrphanedCrews.mockResolvedValue(0);
+    groupService.fetchMyGroups.mockResolvedValue([crew('g1')]);
+
+    await useGroupStore.getState().loadGroups();
+
+    expect(useGroupStore.getState().groups).toHaveLength(1);
+    expect(useGroupStore.getState().activeGroupId).toBe('g1');
   });
 });
 
