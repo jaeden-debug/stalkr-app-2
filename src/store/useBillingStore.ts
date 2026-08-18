@@ -12,6 +12,14 @@ import { useAuthStore } from './useAuthStore';
 import { getPlanFeatures, type PlanFeatures } from '@/constants/plans';
 
 /** Full-access bypass for the owner account(s). */
+/**
+ * Founder accounts. These bypass every paywall and limit unconditionally —
+ * hasFeature, limitFor, withinLimit and canCreateGroup all short-circuit on
+ * isAdmin, so this single list is the whole mechanism.
+ *
+ * Compared case-insensitively against the authenticated email, so it cannot be
+ * spoofed from the client without actually holding that account.
+ */
 const ADMIN_EMAILS = ['admin@zylx.ai'];
 
 interface BillingState {
@@ -52,9 +60,19 @@ export const useBillingStore = create<BillingState>()(
         const userId = auth.user?.id ?? auth.session?.user?.id;
         const email = (auth.user?.email ?? auth.session?.user?.email ?? '').toLowerCase();
 
-        // Admin bypass — full access regardless of any subscription.
+        // Founder bypass — full access regardless of any subscription.
+        //
+        // Assigned 'crew', not 'pro': 'crew' is the TOP tier, and the previous
+        // value silently capped a founder at pro-level entitlements for
+        // anything reading `plan` directly rather than going through
+        // hasFeature() (which does honour isAdmin).
         if (email && ADMIN_EMAILS.includes(email)) {
-          set({ plan: 'pro', isAdmin: true, isLoading: false, lastFetchedAt: new Date().toISOString() });
+          set({
+            plan: 'crew',
+            isAdmin: true,
+            isLoading: false,
+            lastFetchedAt: new Date().toISOString(),
+          });
           return;
         }
         set({ isAdmin: false });

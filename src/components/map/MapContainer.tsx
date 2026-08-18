@@ -21,6 +21,7 @@ import { DestinationMarker } from './DestinationMarker';
 import { RallyPointMarker } from './RallyPointMarker';
 import { MapControls } from './MapControls';
 import { MAP_Z_MARKER, MAP_Z_SHAPE } from '@/constants/mapLayers';
+import { DEFAULT_MAP_STYLE, HIDE_POI_STYLE } from '@/constants/mapStyle';
 
 const MapContainerInner: React.FC = () => {
   const mapRef = useRef<MapView>(null);
@@ -28,6 +29,7 @@ const MapContainerInner: React.FC = () => {
   const [mapReady, setMapReady] = useState(false);
 
   const isSatellite = useMapStore((s) => s.isSatellite);
+  const showPlaces = useMapStore((s) => s.showPlaces);
   const centerTrigger = useMapStore((s) => s.centerTrigger);
   // Boolean, not the location object: this only needs to know WHEN the first
   // fix lands so it can auto-centre once. Subscribing to `myLocation` itself
@@ -160,6 +162,9 @@ const MapContainerInner: React.FC = () => {
         // keyed via `iosGoogleMapsApiKey` in app.config.ts — it was just unused.
         provider={PROVIDER_GOOGLE}
         mapType={isSatellite ? 'hybrid' : 'standard'}
+        // Google ignores customMapStyle on satellite/hybrid — those labels come
+        // baked into the imagery — so only apply it to the standard basemap.
+        customMapStyle={!isSatellite && !showPlaces ? HIDE_POI_STYLE : DEFAULT_MAP_STYLE}
         initialRegion={MAP_CONSTANTS.DEFAULT_REGION}
         onMapReady={() => setMapReady(true)}
         showsUserLocation={false}

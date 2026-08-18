@@ -34,6 +34,12 @@ interface MapState {
   hiddenMarkerTypes: MarkerType[];
   showZones: boolean;
   showTrails: boolean;
+  /**
+   * Google's own points of interest (businesses, transit, attractions).
+   * OFF by default — they compete visually with the crew/marker pins that are
+   * the actual point of this map.
+   */
+  showPlaces: boolean;
   filterSheetOpen: boolean;
 
   // Crew locations (keyed by userId)
@@ -124,6 +130,7 @@ interface MapState {
   setAllMarkerTypes: (visible: boolean, allTypes: MarkerType[]) => void;
   setShowZones: (v: boolean) => void;
   setShowTrails: (v: boolean) => void;
+  setShowPlaces: (v: boolean) => void;
   setFilterSheetOpen: (v: boolean) => void;
 
   // Crew locations
@@ -216,6 +223,7 @@ export const useMapStore = create<MapState>()(
       hiddenMarkerTypes: [],
       showZones: true,
       showTrails: true,
+      showPlaces: false,
       filterSheetOpen: false,
       goToTarget: null,
       goToTrigger: 0,
@@ -277,6 +285,7 @@ export const useMapStore = create<MapState>()(
         set({ hiddenMarkerTypes: visible ? [] : [...allTypes] }),
       setShowZones: (v) => set({ showZones: v }),
       setShowTrails: (v) => set({ showTrails: v }),
+      setShowPlaces: (v) => set({ showPlaces: v }),
       setFilterSheetOpen: (v) => set({ filterSheetOpen: v }),
 
       // Begin a circle-zone draft pre-centered on a searched place. The existing
@@ -667,6 +676,7 @@ export const useMapStore = create<MapState>()(
         units: s.units,
         showZones: s.showZones,
         showTrails: s.showTrails,
+        showPlaces: s.showPlaces,
         hiddenMarkerTypes: s.hiddenMarkerTypes,
       }),
     },

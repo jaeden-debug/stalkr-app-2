@@ -29,7 +29,11 @@ export const PLAN_FEATURES: Record<SubscriptionPlan, PlanFeatures> = {
     trailHistoryHours: 4,
     polygonZones: false,
     zoneAlerts: false,
-    markerPhotos: false,
+    // Photos are free. A marker without a photo is much less useful for the
+    // core job — "this is where camp is, here's what it looks like" — and
+    // gating it meant PhotoGallery rendered no add button at all, so zero
+    // photos were ever uploaded by anyone.
+    markerPhotos: true,
     emergencyContacts: false,
     journeyMode: false,
     watcherNotifications: false,

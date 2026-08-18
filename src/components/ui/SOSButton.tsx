@@ -27,12 +27,12 @@ import {
   AppState,
   type AppStateStatus,
   Easing,
+  Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { LongPressGestureHandler, State } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import { useSOSMode, type SosActivationResult } from '@/hooks/useSOSMode';
 import { FEATURES } from '@/config/features';
@@ -118,6 +118,9 @@ export const SOSButton: React.FC = () => {
   }, [activePulse]);
 
   const cancelHold = useCallback(() => {
+    // onPressOut fires on every release, including ones where no hold started
+    // (cooldown, already active). Bail out rather than churning state.
+    if (!armedRef.current) return;
     clearHoldTimers();
     armedRef.current = false;
     if (!mountedRef.current) return;
@@ -285,29 +288,26 @@ export const SOSButton: React.FC = () => {
         </View>
       )}
 
-      <LongPressGestureHandler
-        minDurationMs={0}
-        maxDist={MAX_SLIDE_PX}
-        onHandlerStateChange={({ nativeEvent }) => {
-          if (nativeEvent.state === State.BEGAN || nativeEvent.state === State.ACTIVE) {
-            startHold();
-          } else if (
-            nativeEvent.state === State.END ||
-            nativeEvent.state === State.CANCELLED ||
-            nativeEvent.state === State.FAILED
-          ) {
-            // Cancel on the ref, not on `holding` — that state may not have
-            // committed yet for a very fast tap.
-            if (armedRef.current) cancelHold();
-          }
-        }}
+      {/* Pressable, not LongPressGestureHandler.
+          The gesture-handler version was the LEGACY RNGH API, and under the New
+          Architecture its onHandlerStateChange did not reliably deliver the END
+          state — so releasing early never cancelled and the countdown ran to
+          completion anyway. The "hold" was cosmetic: a tap armed SOS.
+
+          onPressIn/onPressOut are deterministic and map exactly to the
+          requirement: count down only while held, stop the instant you let go.
+          pressRetentionOffset is zeroed so sliding off the button counts as
+          releasing rather than keeping the press alive. */}
+      <Pressable
+        onPressIn={startHold}
+        onPressOut={cancelHold}
+        pressRetentionOffset={{ top: 0, bottom: 0, left: 0, right: 0 }}
+        hitSlop={0}
+        accessibilityRole="button"
+        accessibilityLabel={`SOS. Hold for ${HOLD_SECONDS} seconds to arm.`}
+        accessibilityHint="A tap will not activate SOS."
       >
-        <Animated.View
-          style={[styles.wrapper, { transform: [{ scale: buttonScale }] }]}
-          accessibilityRole="button"
-          accessibilityLabel={`SOS. Hold for ${HOLD_SECONDS} seconds to arm.`}
-          accessibilityHint="A tap will not activate SOS."
-        >
+        <Animated.View style={[styles.wrapper, { transform: [{ scale: buttonScale }] }]}>
           {holding && (
             <Animated.View style={[styles.progressRing, { transform: [{ rotate: ringRotation }] }]} />
           )}
@@ -322,7 +322,7 @@ export const SOSButton: React.FC = () => {
             </Text>
           </View>
         </Animated.View>
-      </LongPressGestureHandler>
+      </Pressable>
     </View>
   );
 };

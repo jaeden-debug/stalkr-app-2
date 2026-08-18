@@ -29,6 +29,8 @@ export const FilterSheet: React.FC = () => {
   const setShowZones = useMapStore((s) => s.setShowZones);
   const showTrails = useMapStore((s) => s.showTrails);
   const setShowTrails = useMapStore((s) => s.setShowTrails);
+  const showPlaces = useMapStore((s) => s.showPlaces);
+  const setShowPlaces = useMapStore((s) => s.setShowPlaces);
 
   const allVisible = hidden.length === 0;
 
@@ -39,7 +41,18 @@ export const FilterSheet: React.FC = () => {
           {/* Colours mirror ZoneLayer's default zone stroke and TrailLayer's
               self-trail stroke so the swatch reads as the layer it controls. */}
           <Row label="Zones" icon="scan-circle" color="#22c55e" value={showZones} onChange={setShowZones} />
-          <Row label="Trails" icon="footsteps" color="#22c55e" value={showTrails} onChange={setShowTrails} last />
+          <Row label="Trails" icon="footsteps" color="#22c55e" value={showTrails} onChange={setShowTrails} />
+          {/* Google's own POIs — businesses, transit, attractions. Off by
+              default because they compete with the pins that matter. Greyed
+              rather than green: this is basemap chrome, not STALKR data. */}
+          <Row
+            label="Places & businesses"
+            icon="storefront"
+            color="#94A3B8"
+            value={showPlaces}
+            onChange={setShowPlaces}
+            last
+          />
         </View>
 
         <View style={s.sectionHead}>
