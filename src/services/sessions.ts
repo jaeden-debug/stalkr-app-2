@@ -202,6 +202,7 @@ export async function persistSessionPosition(
   latitude: number,
   longitude: number,
   heading: number | null,
+  battery?: { level: number | null; charging: boolean | null },
 ): Promise<void> {
   try {
     await supabase.rpc('update_session_position', {
@@ -209,6 +210,8 @@ export async function persistSessionPosition(
       p_latitude: latitude,
       p_longitude: longitude,
       p_heading: heading,
+      p_battery_level: battery?.level ?? null,
+      p_battery_charging: battery?.charging ?? null,
     });
   } catch {}
 }

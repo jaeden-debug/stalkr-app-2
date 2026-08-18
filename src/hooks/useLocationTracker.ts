@@ -32,6 +32,7 @@ import { sendZoneNotification, sendPushNotification } from '@/services/notificat
 import { logEvent } from '@/services/groupEvents';
 import * as Haptics from 'expo-haptics';
 import { getWatcherPushTokens, persistSessionPosition } from '@/services/sessions';
+import { readBattery } from '@/utils/batteryReport';
 import { useSessionStore } from '@/store/useSessionStore';
 import { supabase } from '@/services/supabase';
 import type { SavedPlace } from '@/types/models';
@@ -522,12 +523,20 @@ export function useLocationTracker() {
               // Broadcast is ephemeral — it reaches only pages already open. The
               // durable copy is what a watcher sees when they open the link
               // cold, reconnect, or refresh.
-              persistSessionPosition(
-                journeySession.id,
-                latitude,
-                longitude,
-                Number.isFinite(resolvedHeading) ? resolvedHeading : null,
-              ).catch(() => {});
+              // Battery rides along with position: it is what lets a watcher
+              // tell "stopped moving" from "phone about to die", which is the
+              // difference between a calm wait and a panic.
+              readBattery()
+                .then((battery) =>
+                  persistSessionPosition(
+                    journeySession.id,
+                    latitude,
+                    longitude,
+                    Number.isFinite(resolvedHeading) ? resolvedHeading : null,
+                    battery,
+                  ),
+                )
+                .catch(() => {});
             } else if (!journeySession && broadcastChannel.current) {
               // Session ended — clean up channel
               supabase.removeChannel(broadcastChannel.current);

@@ -8,6 +8,7 @@ import Head from 'expo-router/head';
 import { useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/services/supabase';
 import { addEmailWatcher } from '@/services/sessions';
+import { resolvePresence, formatLastSeen, PRESENCE_COLOR } from '@/utils/presence';
 
 const ORIGIN = 'https://app.navtrl.com';
 const OG_IMAGE = `${ORIGIN}/stalkr-crew-invite-og-image-new.png`;
@@ -33,6 +34,8 @@ interface SessionInfo {
   last_longitude: number | null;
   last_heading: number | null;
   last_position_at: string | null;
+  battery_level: number | null;
+  battery_charging: boolean | null;
 }
 
 interface LivePayload {
@@ -43,10 +46,6 @@ interface LivePayload {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -61,6 +60,10 @@ export default function WatchPage() {
   const [email, setEmail] = useState('');
   const [emailSent, setEmailSent] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
+  // Freshness is the whole point of this page, so the age has to keep counting
+  // on its own. Without this it froze at whatever it read on load, and a page
+  // left open silently kept claiming a position was seconds old.
+  const [, setClockTick] = useState(0);
   const [emailError, setEmailError] = useState('');
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
@@ -205,6 +208,18 @@ export default function WatchPage() {
     mapRef.current.panTo(pos);
   }, [live]);
 
+  useEffect(() => {
+    if (arrived || cancelled) return;
+    const t = setInterval(() => setClockTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, [arrived, cancelled]);
+
+  // The same freshness model the app uses for crew members, so a watcher and a
+  // crew member are never told two different stories about the same person.
+  const presence = resolvePresence({ lastPingAt: live?.updatedAt ?? null });
+  const batteryPct =
+    session?.battery_level != null ? Math.round(session.battery_level * 100) : null;
+
   // ── Email opt-in ──────────────────────────────────────────────────────────
   const handleEmailSubmit = useCallback(async () => {
     if (!session || !email.trim()) return;
@@ -328,14 +343,43 @@ export default function WatchPage() {
       {/* Map */}
       <div id="watch-map" style={styles.map} />
 
-      {/* Last update */}
-      {live && (
-        <p style={styles.lastUpdate}>
-          Last updated {formatTime(live.updatedAt)}
-        </p>
-      )}
-      {!live && (
+      {/* Freshness + battery.
+          "Last updated 21:14" reads as reassurance whatever the timestamp says.
+          A watcher needs to know whether that position is CURRENT, and if it is
+          not, whether there is an innocent explanation — which is almost always
+          the battery. */}
+      {live ? (
+        <div style={styles.statusRow}>
+          <span style={{ ...styles.statusPill, borderColor: PRESENCE_COLOR[presence.state] }}>
+            <span style={{ ...styles.statusDot, background: PRESENCE_COLOR[presence.state] }} />
+            {presence.state === 'live'
+              ? 'Live now'
+              : presence.state === 'stale'
+                ? `Last seen ${formatLastSeen(presence.ageMs)}`
+                : `No update ${formatLastSeen(presence.ageMs)}`}
+          </span>
+          {batteryPct != null && (
+            <span
+              style={{
+                ...styles.statusPill,
+                // Only a genuinely low battery earns emphasis; colouring a
+                // healthy one would make every page look like a warning.
+                borderColor: batteryPct <= 15 ? '#F87171' : 'rgba(255,255,255,0.18)',
+              }}
+            >
+              {session?.battery_charging ? '⚡ ' : ''}Phone {batteryPct}%
+            </span>
+          )}
+        </div>
+      ) : (
         <p style={styles.lastUpdate}>Waiting for location…</p>
+      )}
+      {live && presence.state !== 'live' && (
+        <p style={styles.staleNote}>
+          {batteryPct != null && batteryPct <= 15
+            ? 'Their phone battery was low, which may be why updates stopped.'
+            : 'Their phone may have lost signal or gone to sleep.'}
+        </p>
       )}
 
       {/* Email opt-in */}
@@ -432,6 +476,37 @@ const styles: Record<string, React.CSSProperties> = {
   map: {
     flex: 1,
     minHeight: 0,
+  },
+  statusRow: {
+    display: 'flex',
+    gap: 8,
+    justifyContent: 'center',
+    flexWrap: 'wrap' as const,
+    margin: '12px 0 0',
+  },
+  statusPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '5px 12px',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.18)',
+    fontSize: 12,
+    fontWeight: 600,
+    color: 'rgba(255,255,255,0.85)',
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: '50%',
+    display: 'inline-block',
+  },
+  staleNote: {
+    textAlign: 'center' as const,
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 12,
+    margin: '8px 16px 0',
+    lineHeight: 1.4,
   },
   lastUpdate: {
     margin: 0,
