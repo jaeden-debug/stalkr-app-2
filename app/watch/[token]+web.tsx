@@ -367,7 +367,15 @@ export default function WatchPage() {
                 borderColor: batteryPct <= 15 ? '#F87171' : 'rgba(255,255,255,0.18)',
               }}
             >
-              {session?.battery_charging ? '⚡ ' : ''}Phone {batteryPct}%
+              {/* Battery is only ever as fresh as the last position — it is
+                  written alongside one. Once updates stop, this is the last
+                  value we were told, NOT a live reading, and the phrasing has
+                  to say so. Showing a bare "Phone 4%" beside a position that
+                  stopped updating twenty minutes ago asserts a live reading we
+                  do not have, about the exact device that may have died. */}
+              {presence.state === 'live'
+                ? `${session?.battery_charging ? '⚡ ' : ''}Phone ${batteryPct}%`
+                : `Phone was ${batteryPct}%${session?.battery_charging ? ' and charging' : ''}`}
             </span>
           )}
         </div>
@@ -377,8 +385,10 @@ export default function WatchPage() {
       {live && presence.state !== 'live' && (
         <p style={styles.staleNote}>
           {batteryPct != null && batteryPct <= 15
-            ? 'Their phone battery was low, which may be why updates stopped.'
-            : 'Their phone may have lost signal or gone to sleep.'}
+            ? `Their battery was at ${batteryPct}% when we last heard from them, which may be why updates stopped.`
+            : batteryPct != null
+              ? `Their battery was at ${batteryPct}% when we last heard from them, so this is more likely lost signal than a dead phone.`
+              : 'Their phone may have lost signal or gone to sleep.'}
         </p>
       )}
 
