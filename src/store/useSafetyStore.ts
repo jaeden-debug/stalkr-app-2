@@ -22,6 +22,7 @@ import {
   deleteCheckInTimer,
   fetchActiveTimer,
   clearActiveTimers,
+  markTimerEscalated,
 } from '@/services/checkInTimers';
 import { logEvent } from '@/services/groupEvents';
 import { fetchEmergencyContacts } from '@/services/emergencyContacts';
@@ -154,6 +155,18 @@ export const useSafetyStore = create<SafetyState>((set, get) => ({
     const { activeTimer, escalating } = get();
     if (!activeTimer || escalating || activeTimer.is_resolved) return;
     set({ escalating: true });
+
+    // Claim this escalation BEFORE notifying, so the server sweep skips it.
+    // The sweep now runs every minute and would otherwise alert the crew a
+    // second time, with a second activity entry, for the same missed check-in.
+    // The DB update is conditional on escalated=false, so whichever path gets
+    // there first wins and the other does nothing.
+    const claimed = await markTimerEscalated(activeTimer.id);
+    if (!claimed) {
+      // The server already escalated this one; it has told the crew.
+      set({ escalating: false });
+      return;
+    }
 
     const userId = useAuthStore.getState().user?.id;
     const profile = useAuthStore.getState().profile;

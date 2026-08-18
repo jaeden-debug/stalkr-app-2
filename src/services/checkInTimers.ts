@@ -33,6 +33,24 @@ export async function clearActiveTimers(userId: string): Promise<void> {
   await supabase.from('check_in_timers').delete().eq('user_id', userId).eq('is_resolved', false);
 }
 
+/**
+ * Claim a timer's escalation so the server sweep does not repeat it.
+ *
+ * The client escalates immediately when the app is alive, which is faster than
+ * waiting up to a minute for the cron sweep. But the sweep is what covers the
+ * case that actually matters — a phone that is dead or offline — so both paths
+ * exist. Writing escalated here is what stops the crew being alerted twice for
+ * one missed check-in, with two feed entries to match.
+ */
+export async function markTimerEscalated(timerId: string): Promise<boolean> {
+  const { error } = await supabase
+    .from('check_in_timers')
+    .update({ escalated: true, escalated_at: new Date().toISOString() })
+    .eq('id', timerId)
+    .eq('escalated', false);
+  return !error;
+}
+
 export async function resolveCheckInTimer(timerId: string): Promise<boolean> {
   const { error } = await supabase
     .from('check_in_timers')
