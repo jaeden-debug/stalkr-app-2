@@ -100,10 +100,15 @@ export function useLocationTracker() {
   const broadcastChannelToken = useRef<string | null>(null);
   const mounted = useRef(true);
 
-  const session = useAuthStore((s) => s.session);
-  const { activeGroupId } = useGroupStore();
-  const { isBroadcasting, isApproximate, sharingMode } = useLocationStore();
-  const { setMyLocation, savedPlaces } = useMapStore();
+  // Primitive / stable selectors only. These were previously whole-store
+  // destructures — `useGroupStore()`, `useLocationStore()`, `useMapStore()` with
+  // no selector each subscribe to EVERY field, so the host screen re-rendered on
+  // any write to any of those stores. `isApproximate` and `sharingMode` are read
+  // through getState() inside the GPS callback and never needed subscriptions.
+  const sessionUserId = useAuthStore((s) => s.session?.user?.id);
+  const activeGroupId = useGroupStore((s) => s.activeGroupId);
+  const isBroadcasting = useLocationStore((s) => s.isBroadcasting);
+  const savedPlaces = useMapStore((s) => s.savedPlaces);
   const setBatteryLevel = useLocationStore((s) => s.setBatteryLevel);
   const setLastBroadcastAt = useLocationStore((s) => s.setLastBroadcastAt);
 
@@ -287,7 +292,7 @@ export function useLocationTracker() {
           lastAccepted.current = { lat: latitude, lng: longitude, acc, spd, t: now };
 
           // Update map store
-          setMyLocation({ latitude, longitude, heading: resolvedHeading, accuracy: acc, speed: spd });
+          useMapStore.getState().setMyLocation({ latitude, longitude, heading: resolvedHeading, accuracy: acc, speed: spd });
 
           const userId = useAuthStore.getState().session?.user?.id;
           const approximate = useLocationStore.getState().isApproximate;
@@ -478,11 +483,11 @@ export function useLocationTracker() {
   // When broadcasting stops, mark offline
   useEffect(() => {
     if (!isBroadcasting) {
-      const userId = session?.user?.id;
+      const userId = sessionUserId;
       const groupId = activeGroupId;
       if (userId && groupId) {
         setLocationOffline(groupId, userId).catch(() => {});
       }
     }
-  }, [isBroadcasting]);
+  }, [isBroadcasting, sessionUserId, activeGroupId]);
 }

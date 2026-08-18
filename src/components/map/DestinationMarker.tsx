@@ -4,7 +4,8 @@ import { Circle, Marker } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { useSessionStore } from '@/store/useSessionStore';
 import { MAP_CONSTANTS } from '@/constants/map';
-import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
+import { useMarkerSnapshot } from '@/hooks/useMarkerSnapshot';
+import { MAP_Z_MARKER, MAP_Z_SHAPE } from '@/constants/mapLayers';
 
 export const DestinationMarker: React.FC = memo(() => {
   // Use the active JOURNEY session — that's what startJourney sets and what the
@@ -17,7 +18,8 @@ export const DestinationMarker: React.FC = memo(() => {
   const lat = journey?.destination_latitude ?? 0;
   const lng = journey?.destination_longitude ?? 0;
   const name = journey?.destination_name ?? 'Destination';
-  const tracksViewChanges = useTracksViewChanges([lat, lng, name]);
+  // Coordinates are NOT reset keys: moving a marker does not change its bitmap.
+  const { tracksViewChanges, onLayout } = useMarkerSnapshot([name]);
 
   if (!hasDestination) return null;
 
@@ -29,14 +31,15 @@ export const DestinationMarker: React.FC = memo(() => {
         strokeColor="rgba(59,130,246,0.9)"
         fillColor="rgba(59,130,246,0.15)"
         strokeWidth={2}
+        zIndex={MAP_Z_SHAPE.DESTINATION}
       />
       <Marker
         coordinate={{ latitude: lat, longitude: lng }}
         anchor={{ x: 0.5, y: 1 }}
         tracksViewChanges={tracksViewChanges}
-        zIndex={20}
+        zIndex={MAP_Z_MARKER.DESTINATION}
       >
-        <View style={styles.wrapper}>
+        <View style={styles.wrapper} onLayout={onLayout}>
           <View style={styles.label}>
             <Text style={styles.labelText} numberOfLines={1}>{name}</Text>
           </View>

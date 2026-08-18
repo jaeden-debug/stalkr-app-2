@@ -98,11 +98,13 @@ export const SelfMarker: React.FC = memo(() => {
           strokeColor={isDark ? 'rgba(107,114,128,0.35)' : 'rgba(34,197,94,0.35)'}
           fillColor={isDark ? 'rgba(107,114,128,0.10)' : 'rgba(34,197,94,0.10)'}
           strokeWidth={1}
+          testID="self-accuracy"
           zIndex={MAP_Z_SHAPE.SELF_ACCURACY}
         />
       )}
 
       <Marker
+        testID="self-puck"
         coordinate={coordinate}
         anchor={{ x: 0.5, y: 0.5 }}
         image={image}

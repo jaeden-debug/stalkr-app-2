@@ -43,6 +43,7 @@ export const SelfSelectionPin: React.FC<SelfSelectionPinProps> = memo(({ coordin
 
   return (
     <Marker
+      testID="self-selection-pin"
       coordinate={coordinate}
       // Anchored at the bottom of the wrapper, which ends in a transparent
       // spacer — so the visible pin floats clear of the puck's ring rather than

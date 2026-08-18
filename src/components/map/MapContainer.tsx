@@ -20,8 +20,9 @@ import { TrailLayer } from './TrailLayer';
 import { DestinationMarker } from './DestinationMarker';
 import { RallyPointMarker } from './RallyPointMarker';
 import { MapControls } from './MapControls';
+import { MAP_Z_MARKER, MAP_Z_SHAPE } from '@/constants/mapLayers';
 
-export const MapContainer: React.FC = () => {
+const MapContainerInner: React.FC = () => {
   const mapRef = useRef<MapView>(null);
   const hasAutocentered = useRef(false);
   const [mapReady, setMapReady] = useState(false);
@@ -173,7 +174,7 @@ export const MapContainer: React.FC = () => {
                 strokeColor="#22c55e"
                 strokeWidth={2}
                 lineDashPattern={[8, 4]}
-                zIndex={20}
+                zIndex={MAP_Z_SHAPE.DRAFT_SHAPE}
               />
             )}
             {polygonDraftPoints.length >= 3 && (
@@ -182,19 +183,11 @@ export const MapContainer: React.FC = () => {
                 fillColor="rgba(34,197,94,0.15)"
                 strokeColor="#22c55e"
                 strokeWidth={1.5}
-                zIndex={19}
+                zIndex={MAP_Z_SHAPE.DRAFT_SHAPE}
               />
             )}
-            {polygonDraftPoints.map((pt, idx) => (
-              <Marker
-                key={`draft-${idx}`}
-                coordinate={pt}
-                anchor={{ x: 0.5, y: 0.5 }}
-                tracksViewChanges
-                zIndex={21}
-              >
-                <View style={styles.draftDot} />
-              </Marker>
+            {polygonDraftPoints.map((pt) => (
+              <DraftVertex key={pt.id} coordinate={pt} />
             ))}
           </>
         )}
@@ -207,7 +200,7 @@ export const MapContainer: React.FC = () => {
               strokeColor="#22c55e"
               strokeWidth={2}
               fillColor="rgba(34,197,94,0.15)"
-              zIndex={18}
+              zIndex={MAP_Z_SHAPE.DRAFT_SHAPE}
             />
             {/* Centre handle — drag to move the whole zone */}
             <Marker
@@ -218,7 +211,7 @@ export const MapContainer: React.FC = () => {
               onDragStart={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
               onDrag={(e) => useMapStore.getState().setCircleDraftCenter(e.nativeEvent.coordinate)}
               onDragEnd={(e) => useMapStore.getState().setCircleDraftCenter(e.nativeEvent.coordinate)}
-              zIndex={22}
+              zIndex={MAP_Z_MARKER.DRAFT_HANDLE}
             >
               <View style={styles.centerHandle}>
                 <View style={styles.centerHandleDot} />
@@ -241,7 +234,7 @@ export const MapContainer: React.FC = () => {
                   .getState()
                   .setCircleDraftRadius(getDistance(circleDraft.center, e.nativeEvent.coordinate))
               }
-              zIndex={22}
+              zIndex={MAP_Z_MARKER.DRAFT_HANDLE}
             >
               <View style={styles.edgeHandle}>
                 <View style={styles.edgeHandleInner} />
@@ -255,7 +248,7 @@ export const MapContainer: React.FC = () => {
             coordinate={{ latitude: searchedPlace.latitude, longitude: searchedPlace.longitude }}
             anchor={{ x: 0.5, y: 1 }}
             tracksViewChanges
-            zIndex={40}
+            zIndex={MAP_Z_MARKER.SEARCH_PIN}
           >
             <View style={styles.searchPin}>
               <Ionicons name="location" size={20} color="#000" />
@@ -266,10 +259,16 @@ export const MapContainer: React.FC = () => {
         {measuring && measurePoints.length > 0 && (
           <>
             {measurePoints.length >= 2 && (
-              <Polyline coordinates={measurePoints} strokeColor="#4ADE80" strokeWidth={3} lineDashPattern={[2, 6]} zIndex={30} />
+              <Polyline coordinates={measurePoints} strokeColor="#4ADE80" strokeWidth={3} lineDashPattern={[2, 6]} zIndex={MAP_Z_SHAPE.MEASURE_LINE} />
             )}
             {measurePoints.map((p, i) => (
-              <Marker key={`measure-${i}`} coordinate={p} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges zIndex={31}>
+              <Marker
+                key={p.id}
+                coordinate={p}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges
+                zIndex={MAP_Z_MARKER.MEASURE_POINT}
+              >
                 <View style={styles.measureDot}><Text style={styles.measureDotText}>{i + 1}</Text></View>
               </Marker>
             ))}
@@ -288,6 +287,29 @@ export const MapContainer: React.FC = () => {
     </View>
   );
 };
+
+/**
+ * Memoized: MapContainer takes no props, so this guarantees it re-renders only
+ * when one of its own subscriptions changes — never merely because MapScreen
+ * re-rendered for an unrelated reason.
+ */
+export const MapContainer = React.memo(MapContainerInner);
+MapContainer.displayName = 'MapContainer';
+
+/** Draft vertex with a stable identity, so undo cannot reuse a stale native view. */
+const DraftVertex: React.FC<{ coordinate: { latitude: number; longitude: number } }> = React.memo(
+  ({ coordinate }) => (
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges
+      zIndex={MAP_Z_MARKER.DRAFT_POINT}
+    >
+      <View style={styles.draftDot} />
+    </Marker>
+  ),
+);
+DraftVertex.displayName = 'DraftVertex';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0f' },

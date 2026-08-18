@@ -5,6 +5,10 @@ import { Alert } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { Marker, SavedPlace, MapCrewMember, SelectedMapUser, RallyPoint } from '@/types/models';
 import type { MarkerType, LatLng } from '@/types/database';
+import { createLocalId } from '@/utils/ids';
+
+/** An ephemeral, client-only point with a stable identity for React keys. */
+export type DraftPoint = LatLng & { id: string };
 import * as markerService from '@/services/markers';
 import * as savedPlaceService from '@/services/savedPlaces';
 import { logEvent } from '@/services/groupEvents';
@@ -22,7 +26,7 @@ interface MapState {
 
   // Measure tool
   measuring: boolean;
-  measurePoints: LatLng[];
+  measurePoints: DraftPoint[];
   units: 'metric' | 'imperial';
 
   // Layer filters
@@ -68,7 +72,7 @@ interface MapState {
   placingCircleZone: boolean;
   placingSavedPlace: boolean; // alias for placingCircleZone
   placingPolygonZone: boolean;
-  polygonDraftPoints: LatLng[];
+  polygonDraftPoints: DraftPoint[];
   // Live circle draft while placing a circle zone (center + radius in metres).
   // Null until the user taps to drop the center.
   circleDraft: { center: LatLng; radius: number } | null;
@@ -253,7 +257,8 @@ export const useMapStore = create<MapState>()(
       // ── Measure tool ──
       startMeasure: () => set({ measuring: true, measurePoints: [] }),
       stopMeasure: () => set({ measuring: false, measurePoints: [] }),
-      addMeasurePoint: (p) => set((s) => ({ measurePoints: [...s.measurePoints, p] })),
+      addMeasurePoint: (p) =>
+        set((s) => ({ measurePoints: [...s.measurePoints, { ...p, id: createLocalId('measure') }] })),
       undoMeasurePoint: () => set((s) => ({ measurePoints: s.measurePoints.slice(0, -1) })),
       clearMeasure: () => set({ measurePoints: [] }),
       toggleUnits: () => set((s) => ({ units: s.units === 'metric' ? 'imperial' : 'metric' })),
@@ -465,9 +470,13 @@ export const useMapStore = create<MapState>()(
         set({ placingCircleZone: false, placingSavedPlace: false, placingPolygonZone: false, polygonDraftPoints: [], circleDraft: null }),
 
       addPolygonPoint: (point) =>
-        set((s) => ({ polygonDraftPoints: [...s.polygonDraftPoints, point] })),
+        set((s) => ({
+          polygonDraftPoints: [...s.polygonDraftPoints, { ...point, id: createLocalId('vertex') }],
+        })),
       addPolygonDraftPoint: (point) =>
-        set((s) => ({ polygonDraftPoints: [...s.polygonDraftPoints, point] })),
+        set((s) => ({
+          polygonDraftPoints: [...s.polygonDraftPoints, { ...point, id: createLocalId('vertex') }],
+        })),
 
       removeLastPolygonPoint: () =>
         set((s) => ({ polygonDraftPoints: s.polygonDraftPoints.slice(0, -1) })),
@@ -483,7 +492,9 @@ export const useMapStore = create<MapState>()(
           pendingZoneCreation: {
             type: 'polygon',
             coords: { latitude: lat, longitude: lng },
-            polygonPoints: polygonDraftPoints,
+            // Strip local ids — they are React keys, not geometry, and must
+            // not be written into the polygon_coords jsonb column.
+            polygonPoints: polygonDraftPoints.map(({ latitude, longitude }) => ({ latitude, longitude })),
           },
         });
       },

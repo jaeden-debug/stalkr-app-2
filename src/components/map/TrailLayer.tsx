@@ -7,6 +7,7 @@ import { Polyline } from 'react-native-maps';
 import { useMapStore } from '@/store/useMapStore';
 import { getCrewColor } from '@/constants/map';
 import { useAuthStore } from '@/store/useAuthStore';
+import { MAP_Z_SHAPE } from '@/constants/mapLayers';
 
 export const TrailLayer: React.FC = memo(() => {
   const userTrails = useMapStore((s) => s.userTrails);
@@ -30,6 +31,7 @@ export const TrailLayer: React.FC = memo(() => {
             strokeColor={`${color}cc`}
             strokeWidth={3}
             lineDashPattern={[6, 6]}
+            zIndex={MAP_Z_SHAPE.TRAIL}
           />
         );
       })}
