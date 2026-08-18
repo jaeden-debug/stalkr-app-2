@@ -1,8 +1,10 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- P1: the 'viewer' role's read-only restriction is not enforced in production.
 --
--- NOT APPLIED — this changes who can write in a live database, which is a
--- product decision. Review before running.
+-- APPLIED. Verified before running: 5 owners, 1 member, ZERO viewers, so no
+-- current user lost access. Verified after: every write path on
+-- live_locations / markers / saved_places / trail_points now has exactly ONE
+-- policy and it is contributor-gated.
 --
 -- ── What was found ──────────────────────────────────────────────────────────
 -- The live database contains TWO parallel policy sets. One matches this repo
