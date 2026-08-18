@@ -9,6 +9,7 @@ import * as Sentry from '@sentry/react-native';
 import { PostHogProvider } from 'posthog-react-native';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { useNotificationRouter } from '@/hooks/useNotificationRouter';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useBillingStore } from '@/store/useBillingStore';
 import { useGroupStore } from '@/store/useGroupStore';
@@ -24,6 +25,10 @@ initSentry();
 const posthogClient = initPostHog();
 
 function RootLayoutInner() {
+  // Notification taps used to go nowhere — every push dropped you on whatever
+  // screen you last left, however urgent it was.
+  useNotificationRouter();
+
   const initialize = useAuthStore((s) => s.initialize);
   const loadEntitlement = useBillingStore((s) => s.loadEntitlement);
   const user = useAuthStore((s) => s.user);

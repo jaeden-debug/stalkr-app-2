@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import { MapContainer } from '@/components/map/MapContainer';
 import { SearchOverlay } from '@/components/map/SearchOverlay';
 import { SharingConsentPrompt } from '@/components/map/SharingConsentPrompt';
@@ -33,6 +34,31 @@ export default function MapScreen() {
   const setSelectedMapUser     = useMapStore((s) => s.setSelectedMapUser);
   const setSelectedFieldMarkerId = useMapStore((s) => s.setSelectedFieldMarkerId);
   const setSelectedSavedPlaceId  = useMapStore((s) => s.setSelectedSavedPlaceId);
+
+  // A notification tap routes here with params describing what it was about.
+  // Getting the user to the map is only half the job — without this the screen
+  // opens showing wherever they happened to be looking, which for an SOS is
+  // indistinguishable from the tap having done nothing.
+  const params = useLocalSearchParams<{
+    lat?: string; lng?: string; markerId?: string; zoneId?: string; focus?: string;
+  }>();
+  const goTo = useMapStore((st) => st.goTo);
+  const handledFocus = useRef<string | null>(null);
+
+  useEffect(() => {
+    // One key per delivered notification, so re-renders do not re-fire the
+    // camera move and fight the user for control of the map.
+    const key = [params.focus, params.lat, params.lng, params.markerId, params.zoneId].join('|');
+    if (key === '||||' || handledFocus.current === key) return;
+    handledFocus.current = key;
+
+    const lat = Number(params.lat);
+    const lng = Number(params.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      goTo({ latitude: lat, longitude: lng });
+    }
+    if (params.markerId) setSelectedFieldMarkerId(params.markerId);
+  }, [params.focus, params.lat, params.lng, params.markerId, params.zoneId, goTo, setSelectedFieldMarkerId]);
 
   useLocationTracker();
   useRealtimeGroup();
