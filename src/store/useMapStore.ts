@@ -6,6 +6,7 @@ import * as Haptics from 'expo-haptics';
 import type { Marker, SavedPlace, MapCrewMember, SelectedMapUser, RallyPoint } from '@/types/models';
 import type { MarkerType, LatLng } from '@/types/database';
 import { createLocalId } from '@/utils/ids';
+import { isStaleUpdate } from '@/utils/eventOrder';
 
 /** An ephemeral, client-only point with a stable identity for React keys. */
 export type DraftPoint = LatLng & { id: string };
@@ -329,8 +330,19 @@ export const useMapStore = create<MapState>()(
         }
       },
 
+      /**
+       * Apply a crew position, rejecting out-of-order deliveries.
+       *
+       * Realtime does not guarantee arrival order, so without this a delayed
+       * 10:04:04 packet arriving after 10:04:08 would drag the marker
+       * backwards in time — and a stale 'live' ping still in flight could undo
+       * a Go Dark transition. Ordering uses the server timestamp on the row.
+       */
       setCrewLocation: (userId, loc) =>
-        set((s) => ({ crewLocations: { ...s.crewLocations, [userId]: loc } })),
+        set((s) => {
+          if (isStaleUpdate(s.crewLocations[userId], loc)) return {};
+          return { crewLocations: { ...s.crewLocations, [userId]: loc } };
+        }),
       removeCrewLocation: (userId) =>
         set((s) => {
           const copy = { ...s.crewLocations };
