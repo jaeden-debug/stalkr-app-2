@@ -333,14 +333,27 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
         );
         eventService.logEvent(groupId, userId, 'journey_completed', `Journey completed: ${session.name}`, undefined).catch(() => {});
       }
-      // Trigger arrival email Edge Function (fire and forget)
+      // Arrival email. The function now requires proof that the caller is the
+      // traveller — it previously accepted a bare sessionId from anyone, which
+      // meant a forged "arrived safely" could be sent to someone's watchers.
+      //
+      // Still fire-and-forget from here, and still therefore unreliable: if the
+      // phone dies or drops signal at this exact moment, nobody is told. That
+      // is why arrival notification is moving server-side; this call stays as
+      // the fast path.
       if (session) {
-        const fnUrl = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/send-arrival-email`;
-        fetch(fnUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId }),
-        }).catch(() => {});
+        const token = useAuthStore.getState().session?.access_token;
+        if (token) {
+          const fnUrl = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/send-arrival-email`;
+          fetch(fnUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ sessionId }),
+          }).catch(() => {});
+        }
       }
     }
     return ok;
