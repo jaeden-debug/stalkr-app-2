@@ -181,6 +181,56 @@ describe('leaving a crew', () => {
   });
 });
 
+describe('removal while the app is open', () => {
+  it('drops the crew population when membership is gone', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { useMapStore } = require('@/store/useMapStore');
+    useGroupStore.setState({ groups: [crew('g1')], activeGroupId: 'g1', groupMembers: [{ id: 'm1' }] as never });
+    useMapStore.setState({
+      markers: [{ id: 'mk1' }] as never,
+      savedPlaces: [{ id: 'z1' }] as never,
+      crewLocations: { u2: { user_id: 'u2' } } as never,
+      populationGroupId: 'g1',
+    });
+
+    // An admin removed us: fetchMyGroups no longer returns g1.
+    groupService.fetchMyGroups.mockResolvedValue([]);
+    await useGroupStore.getState().loadGroups();
+
+    const map = useMapStore.getState();
+    expect(map.markers).toEqual([]);
+    expect(map.savedPlaces).toEqual([]);
+    expect(map.crewLocations).toEqual({});
+    expect(map.populationGroupId).toBeNull();
+    expect(useGroupStore.getState().activeGroupId).toBeNull();
+    expect(useGroupStore.getState().groupMembers).toEqual([]);
+  });
+
+  it('switches to a remaining crew rather than leaving a dead active id', async () => {
+    useGroupStore.setState({ groups: [crew('g1'), crew('g2')], activeGroupId: 'g1' });
+    groupService.fetchMyGroups.mockResolvedValue([crew('g2')]);
+
+    await useGroupStore.getState().loadGroups();
+
+    expect(useGroupStore.getState().activeGroupId).toBe('g2');
+  });
+
+  it('leaves an intact membership completely alone', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { useMapStore } = require('@/store/useMapStore');
+    const markers = [{ id: 'mk1' }] as never;
+    useGroupStore.setState({ groups: [crew('g1')], activeGroupId: 'g1' });
+    useMapStore.setState({ markers, populationGroupId: 'g1' });
+
+    groupService.fetchMyGroups.mockResolvedValue([crew('g1')]);
+    await useGroupStore.getState().loadGroups();
+
+    // Still a member: the population must NOT be torn down and rebuilt.
+    expect(useMapStore.getState().markers).toBe(markers);
+    expect(useGroupStore.getState().activeGroupId).toBe('g1');
+  });
+});
+
 describe('switching crews does not change privacy', () => {
   it('activating a never-opted-into crew leaves you dark', async () => {
     // setActiveGroupId used to mirror the per-crew flag into the global one and

@@ -21,6 +21,7 @@
  * to B.
  */
 import { useEffect, useRef } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import { supabase } from '@/services/supabase';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useMapStore } from '@/store/useMapStore';
@@ -208,12 +209,26 @@ export function useRealtimeGroup() {
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR') {
           console.warn('[realtime] channel error, will retry');
+          // A channel error can mean we lost read access to this crew (removed
+          // by an admin), not just a transient network fault. Re-verifying
+          // membership is cheap and is the only way the app learns it was
+          // removed while open.
+          useGroupStore.getState().loadGroups();
         }
       });
 
     channelRef.current = channel;
 
+    // Returning to the foreground is the other moment membership may have
+    // changed without us hearing about it — realtime does not deliver events
+    // for rows we can no longer read.
+    const onAppState = (next: AppStateStatus) => {
+      if (next === 'active') useGroupStore.getState().loadGroups();
+    };
+    const appStateSub = AppState.addEventListener('change', onAppState);
+
     return () => {
+      appStateSub.remove();
       channel.unsubscribe();
       supabase.removeChannel(channel);
       channelRef.current = null;

@@ -58,12 +58,27 @@ export const useGroupStore = create<GroupState>()(
     set({ isLoading: true, error: null });
     const groups = await groupService.fetchMyGroups(userId);
     set({ groups, isLoading: false });
+
     const currentActiveId = get().activeGroupId;
-    if (currentActiveId && groups.find((g) => g.id === currentActiveId)) {
-      // Persisted activeGroupId is valid — keep it
-    } else if (groups.length > 0) {
-      set({ activeGroupId: groups[0].id });
+    const stillAMember = !!currentActiveId && groups.some((g) => g.id === currentActiveId);
+
+    if (stillAMember) return;
+
+    // We are no longer in the crew that is currently on screen — either removed
+    // by an admin, or it was deleted. Its markers, zones and crew positions are
+    // now unauthorized data sitting in memory, so drop them BEFORE switching.
+    //
+    // Nothing used to do this: loadGroups ran only at launch and on auth change,
+    // so a member removed while the app was open kept seeing the crew, its map
+    // population and its realtime channel until the app restarted.
+    if (currentActiveId) {
+      // Lazy require avoids a circular import between the two stores.
+      const { useMapStore } = require('./useMapStore');
+      useMapStore.getState().suspendPopulation();
+      set({ groupMembers: [] });
     }
+
+    set({ activeGroupId: groups.length > 0 ? groups[0].id : null });
   },
 
   createGroup: async (name, type = 'custom', enforceTracking = false) => {
