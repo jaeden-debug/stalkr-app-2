@@ -37,7 +37,8 @@
     "production": {
       "ios": {
         "appleId": "subscriptions@stillawakemedia.com",
-        "appleTeamId": "632569QA3T"
+        "appleTeamId": "632569QA3T",
+        "ascAppId": "6775441260"
       },
       "android": {
         "serviceAccountKeyPath": "./google-service-account.json",
