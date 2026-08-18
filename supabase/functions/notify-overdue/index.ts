@@ -22,6 +22,7 @@
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { isTrustedServerCaller } from '../_shared/trustedCaller.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
@@ -35,7 +36,7 @@ serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405);
 
   const bearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  if (!bearer || bearer !== SERVICE_ROLE_KEY) return json({ error: 'forbidden' }, 403);
+  if (!isTrustedServerCaller(bearer, SERVICE_ROLE_KEY)) return json({ error: 'forbidden' }, 403);
 
   try {
     const { sessionId, kind } = (await req.json()) as {

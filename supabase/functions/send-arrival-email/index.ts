@@ -30,6 +30,7 @@
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { isTrustedServerCaller } from '../_shared/trustedCaller.ts';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
@@ -64,7 +65,7 @@ serve(async (req) => {
     if (sErr || !session) return json({ error: 'session not found' }, 404);
 
     // Authorization: the traveller themselves, or a trusted server context.
-    const isServerCaller = bearer === SERVICE_ROLE_KEY;
+    const isServerCaller = isTrustedServerCaller(bearer, SERVICE_ROLE_KEY);
     if (!isServerCaller) {
       const asUser = createClient(SUPABASE_URL, ANON_KEY, {
         global: { headers: { Authorization: `Bearer ${bearer}` } },
