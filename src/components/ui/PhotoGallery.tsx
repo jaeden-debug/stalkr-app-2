@@ -14,11 +14,26 @@ interface Photo { id: string; url?: string }
 interface Props {
   reloadKey?: string;
   canEdit?: boolean;
+  /**
+   * Why editing is unavailable, when canEdit is false. Without this the add
+   * button just silently vanishes and the user has no idea a photo is even
+   * possible — which is why zero photos were ever uploaded.
+   */
+  lockedReason?: string;
+  /** Called when a locked gallery is tapped, e.g. to open the paywall. */
+  onLockedPress?: () => void;
   load: () => Promise<Photo[]>;
   upload: (uri: string) => Promise<Photo | null>;
 }
 
-export function PhotoGallery({ reloadKey, canEdit = true, load, upload }: Props) {
+export function PhotoGallery({
+  reloadKey,
+  canEdit = true,
+  lockedReason,
+  onLockedPress,
+  load,
+  upload,
+}: Props) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -77,6 +92,16 @@ const s = StyleSheet.create({
   wrap: { gap: 8 },
   label: { color: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: '900', letterSpacing: 1.4 },
   row: { gap: 10, alignItems: 'center', paddingVertical: 2 },
+  lockedTile: {
+    width: 76, height: 76, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+    gap: 4, paddingHorizontal: 6,
+    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)', borderStyle: 'dashed',
+  },
+  lockedText: {
+    color: 'rgba(255,255,255,0.5)', fontSize: 9, fontWeight: '700',
+    textAlign: 'center', letterSpacing: 0.2,
+  },
   addTile: {
     width: 76, height: 76, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 4,
     backgroundColor: 'rgba(34,197,94,0.1)', borderWidth: 1, borderColor: 'rgba(34,197,94,0.4)', borderStyle: 'dashed',

@@ -2,6 +2,7 @@
  * MarkerDetailSheet — shows details for a selected tactical marker.
  * Owners can rename, drag-to-move, and delete.
  */
+import { useRouter } from 'expo-router';
 import React, { memo, useCallback, useEffect, useState } from 'react';
 import {
   Alert,
@@ -40,6 +41,7 @@ interface MarkerDetailSheetProps {
 
 export const MarkerDetailSheet: React.FC<MarkerDetailSheetProps> = memo(
   ({ visible, markerId, onClose }) => {
+    const router = useRouter();
     const markers = useMapStore((s) => s.markers);
     const deleteMarker = useMapStore((s) => s.deleteMarker);
     const updateMarkerInStore = useMapStore((s) => s.updateMarkerInStore);
@@ -52,6 +54,13 @@ export const MarkerDetailSheet: React.FC<MarkerDetailSheetProps> = memo(
     const [title, setTitle] = useState('');
     const [renaming, setRenaming] = useState(false);
     const [saving, setSaving] = useState(false);
+    // Subscribe rather than read imperatively. `useBillingStore.getState()`
+    // inside render does NOT subscribe, so once entitlements finished loading
+    // the gate stayed stale and the add button never appeared for a user who
+    // had actually paid.
+    const planFeatureOn = useBillingStore((b) => b.hasFeature('markerPhotos'));
+    const canAddPhotos = !!userId && planFeatureOn;
+
 
     // Arrival state is read from the marker so it stays correct when another
     // device changes it; local state exists only to keep the toggle responsive.
@@ -143,7 +152,9 @@ export const MarkerDetailSheet: React.FC<MarkerDetailSheetProps> = memo(
           {/* Photos (adding is a paid feature) */}
           <PhotoGallery
             reloadKey={marker.id}
-            canEdit={!!userId && useBillingStore.getState().hasFeature('markerPhotos')}
+            canEdit={canAddPhotos}
+            lockedReason={'Photos are a Pro feature'}
+            onLockedPress={() => router.push('/subscription')}
             load={() => fetchMarkerPhotos(marker.id).then((ps) => ps.map((p) => ({ id: p.id, url: p.url })))}
             upload={(uri) => uploadMarkerPhoto(marker.id, marker.group_id, userId!, uri).then((p) => (p ? { id: p.id, url: p.url } : null))}
           />

@@ -2,6 +2,7 @@
  * ZoneDetailSheet — shows details for a selected saved place/zone.
  * Owners/creators can rename, move, toggle alerts, and delete.
  */
+import { useRouter } from 'expo-router';
 import React, { memo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Sheet } from '@/components/ui/Sheet';
@@ -30,6 +31,13 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
   const setMovingZoneId = useMapStore((s) => s.setMovingZoneId);
   const userId = useAuthStore((s) => s.user?.id);
   const toast = useToast();
+  const router = useRouter();
+
+  // Subscribe rather than read imperatively. useBillingStore.getState() inside
+  // render does NOT subscribe, so the gate stayed stale after entitlements
+  // loaded and the add button never appeared for a user who had actually paid.
+  const planFeatureOn = useBillingStore((b) => b.hasFeature('markerPhotos'));
+  const canAddPhotos = !!userId && planFeatureOn;
 
   const [savingArrival, setSavingArrival] = useState(false);
   const [savingLeave, setSavingLeave] = useState(false);
@@ -152,7 +160,9 @@ export const ZoneDetailSheet: React.FC<ZoneDetailSheetProps> = memo(({ visible, 
         {/* Photos */}
         <PhotoGallery
           reloadKey={zone.id}
-          canEdit={!!userId && useBillingStore.getState().hasFeature('markerPhotos')}
+          canEdit={canAddPhotos}
+            lockedReason={'Photos are a Pro feature'}
+            onLockedPress={() => router.push('/subscription')}
           load={() => fetchSavedPlacePhotos(zone.id).then((ps) => ps.map((p) => ({ id: p.id, url: p.url })))}
           upload={(uri) => uploadSavedPlacePhoto(zone.id, zone.group_id, userId!, uri).then((p) => (p ? { id: p.id, url: p.url } : null))}
         />
