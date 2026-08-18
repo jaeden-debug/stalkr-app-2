@@ -21,36 +21,54 @@ export interface LiveLocationPayload {
  * Upsert the current user's live location for a group.
  * Uses ON CONFLICT (group_id, user_id) DO UPDATE to ensure one row per user/group.
  */
+/**
+ * Write this device's position for a crew, newest-fix-wins.
+ *
+ * live_locations is UNIQUE (group_id, user_id), so a plain upsert let whoever
+ * wrote LAST win regardless of when the fix was taken. That breaks in two real
+ * situations: one account signed into two devices (the crew sees the marker
+ * flick between them), and a single device on a flaky network replaying a
+ * delayed write over a newer one.
+ *
+ * The client-side guard in utils/eventOrder.ts protects the READ path only — by
+ * the time a stale row is in the database, every other client fetches it. The
+ * RPC applies `ON CONFLICT ... DO UPDATE ... WHERE excluded.last_ping_at >
+ * live_locations.last_ping_at`, so ordering is enforced where it actually
+ * matters. It runs SECURITY INVOKER, so ll_insert / ll_update RLS still apply.
+ *
+ * Returns false only on a real error — a write rejected for being stale is a
+ * successful no-op, not a failure.
+ */
 export async function upsertLiveLocation(payload: LiveLocationPayload): Promise<boolean> {
   const now = new Date().toISOString();
-  const row: DbLiveLocationUpsert = {
-    group_id: payload.groupId,
-    user_id: payload.userId,
-    latitude: payload.isApproximate ? null : payload.latitude,
-    longitude: payload.isApproximate ? null : payload.longitude,
-    approximate_latitude: payload.isApproximate ? payload.approximateLatitude ?? payload.latitude : null,
-    approximate_longitude: payload.isApproximate ? payload.approximateLongitude ?? payload.longitude : null,
-    heading: payload.heading,
-    speed: payload.speed,
-    accuracy: payload.accuracy,
-    battery_level: payload.batteryLevel ?? null,
-    status: payload.status,
-    sharing_mode: payload.sharingMode,
-    is_approximate: payload.isApproximate,
-    last_ping_at: now,
-    updated_at: now,
-  };
 
-  const { error } = await supabase
-    .from('live_locations')
-    .upsert(row, { onConflict: 'group_id,user_id' });
+  const { error } = await supabase.rpc('upsert_live_location', {
+    p_group_id: payload.groupId,
+    p_latitude: payload.isApproximate ? null : payload.latitude,
+    p_longitude: payload.isApproximate ? null : payload.longitude,
+    p_approximate_latitude: payload.isApproximate
+      ? payload.approximateLatitude ?? payload.latitude
+      : null,
+    p_approximate_longitude: payload.isApproximate
+      ? payload.approximateLongitude ?? payload.longitude
+      : null,
+    p_heading: payload.heading,
+    p_speed: payload.speed,
+    p_accuracy: payload.accuracy,
+    p_battery_level: payload.batteryLevel ?? null,
+    p_status: payload.status,
+    p_sharing_mode: payload.sharingMode,
+    p_is_approximate: payload.isApproximate,
+    p_last_ping_at: now,
+  });
 
-  return !error;
+  if (error) {
+    console.error('[liveLocations] upsert failed:', error.message, error.code);
+    return false;
+  }
+  return true;
 }
 
-/**
- * Mark user as offline in a group (stop broadcasting).
- */
 export async function setLocationOffline(groupId: string, userId: string): Promise<void> {
   await supabase
     .from('live_locations')
