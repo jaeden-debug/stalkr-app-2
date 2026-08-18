@@ -31,6 +31,9 @@ export const MapControls: React.FC = memo(() => {
   const cancelZone             = useMapStore((s) => s.cancelZonePlacement);
   const backCircleDraft        = useMapStore((s) => s.backCircleDraft);
   const confirmCircleDraft     = useMapStore((s) => s.confirmCircleDraft);
+  const placeAtMyLocation      = useMapStore((s) => s.placeMarkerAtMyLocation);
+  const hasFix                 = useMapStore((s) => s.myLocation != null);
+  const accuracy               = useMapStore((s) => s.myLocation?.accuracy);
 
   const isPlacing = placingMarker || placingCircle || placingPolygon;
   if (!isPlacing) return null;
@@ -45,7 +48,12 @@ export const MapControls: React.FC = memo(() => {
   let bannerText: string;
   let icon: React.ComponentProps<typeof Ionicons>['name'];
   if (placingMarker) {
-    bannerText = 'TAP MAP TO DROP MARKER';
+    // Show the accuracy the device is actually reporting, so the user knows
+    // whether "use my location" will be precise enough for what they are
+    // marking. Silence about accuracy is how a pin ends up 40m from camp.
+    bannerText = hasFix && accuracy != null
+      ? `TAP MAP, OR USE GPS  ·  ±${Math.round(accuracy)}m`
+      : 'TAP MAP TO DROP MARKER';
     icon = 'pin';
   } else if (placingPolygon) {
     bannerText = `TAP TO ADD POINT  ·  ${polygonDraftPoints.length} PLACED`;
@@ -65,6 +73,23 @@ export const MapControls: React.FC = memo(() => {
         <Text style={s.bannerText} numberOfLines={1}>{bannerText}</Text>
 
         <View style={s.actions}>
+          {/* ── Place at my exact position ──
+              A fingertip covers tens of metres at property zoom, so tapping
+              cannot place "camp" accurately. This uses the GPS fix instead. */}
+          {placingMarker && hasFix && (
+            <TouchableOpacity
+              style={s.primaryBtn}
+              onPress={() => {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                placeAtMyLocation();
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="locate" size={13} color="#04140A" />
+              <Text style={s.primaryText}>USE GPS</Text>
+            </TouchableOpacity>
+          )}
+
           {/* ── Polygon controls ── */}
           {placingPolygon && polygonDraftPoints.length > 0 && (
             <TouchableOpacity

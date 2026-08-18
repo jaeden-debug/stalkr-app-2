@@ -37,6 +37,17 @@ const STATIONARY_SPEED_MPS = 0.8;
 const STATIONARY_DRIFT_M = 12;
 const MAX_SPEED_MPS = 45;
 
+/**
+ * How often to check whether the position has gone stale, and how old it must
+ * be before we force a fresh fix.
+ *
+ * Sized against the presence policy: LIVE_WINDOW_MS is 5 minutes, so refreshing
+ * at 60s keeps a stationary user comfortably inside "live" without waking the
+ * GPS more than necessary.
+ */
+const HEARTBEAT_CHECK_MS = 20_000;
+const HEARTBEAT_AFTER_MS = 60_000;
+
 // ── Sensor ownership ────────────────────────────────────────────────────────
 // Exactly one position watcher and one heading watcher may exist at a time.
 //
@@ -50,6 +61,16 @@ const MAX_SPEED_MPS = 45;
 // re-validated after each await so a subscription created by a losing or
 // unmounted instance is disposed rather than stored.
 let watchOwnerToken: symbol | null = null;
+/**
+ * Set once tracking starts. Exposed so going live can demand a fresh fix
+ * instead of showing a position from before the user was sharing.
+ */
+let refreshPositionNow: (() => Promise<void>) | null = null;
+
+/** Force a fresh GPS fix now, if tracking is running. Safe to call anytime. */
+export async function requestImmediateLocationRefresh(): Promise<void> {
+  await refreshPositionNow?.();
+}
 let positionSub: Location.LocationSubscription | null = null;
 let headingSub: Location.LocationSubscription | null = null;
 
@@ -89,7 +110,13 @@ export function useLocationTracker() {
   // indoors, so the unfiltered value made the puck shiver while standing still.
   // Averaging plain numbers would be wrong across the 0/360 seam, so the
   // smoother always moves along the shortest arc.
-  const headingSmoother = useRef(createHeadingSmoother({ alpha: 0.25, deadbandDeg: 1.5, snapDeg: 25 }));
+  const headingSmoother = useRef(createHeadingSmoother({ alpha: 0.35, deadbandDeg: 1.5, snapDeg: 18 }));
+  /** Whether the last reading came from TRUE north; a change means reset, not ease. */
+  const headingSourceIsTrue = useRef<boolean | null>(null);
+  /** Heartbeat that keeps presence live while the user is standing still. */
+  const heartbeat = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Timestamp of the last position we accepted, for heartbeat staleness checks. */
+  const lastFixAt = useRef(0);
   const lastLiveWritePerGroup = useRef<Record<string, number>>({});
   const offlineMarkedGroups = useRef<Set<string>>(new Set());
   const lastTrailWrite = useRef<{ lat: number; lng: number; t: number } | null>(null);
@@ -225,11 +252,34 @@ export function useLocationTracker() {
       // the same store. Nothing but the puck and the HUD reads heading now.
       const hSub = await Location.watchHeadingAsync((h) => {
         if (isStale()) return;
-        // trueHeading is relative to geographic north, which is what the map's
-        // marker rotation expects. It reads -1 until a location fix exists, so
-        // fall back to magnetic north until then.
-        const raw = h.trueHeading != null && h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+
+        // iOS reports the magnetometer's uncertainty in `accuracy`, in degrees.
+        // A NEGATIVE value means the reading is invalid — the compass needs the
+        // figure-8 calibration. Feeding those in is a direct cause of the arrow
+        // pointing somewhere the phone is not.
+        const headingAccuracy = typeof h.accuracy === 'number' ? h.accuracy : null;
+        if (headingAccuracy !== null && headingAccuracy < 0) return;
+
+        // trueHeading is measured from GEOGRAPHIC north, which is what the map
+        // needs. magHeading is measured from MAGNETIC north, which differs by
+        // the local declination — roughly 10-15 degrees across North America.
+        // Using magnetic as though it were true is a constant, visible offset:
+        // the arrow looks "a bit off" no matter which way you face.
+        //
+        // trueHeading is -1 until a location fix exists, so early readings are
+        // necessarily magnetic. We still use them (a roughly-right arrow beats
+        // none) but track WHICH source produced the value.
+        const hasTrue = h.trueHeading != null && h.trueHeading >= 0;
+        const raw = hasTrue ? h.trueHeading : h.magHeading;
         if (!isFinite(raw)) return;
+
+        // Switching source is not a turn. Easing across the declination step
+        // would drift the arrow for several seconds; reset so the first
+        // true-north reading is adopted immediately.
+        if (headingSourceIsTrue.current !== hasTrue) {
+          headingSourceIsTrue.current = hasTrue;
+          headingSmoother.current.reset();
+        }
 
         const smoothed = headingSmoother.current.push(raw);
         if (smoothed == null) return;
@@ -238,7 +288,7 @@ export function useLocationTracker() {
         // The smoother already applies a deadband; this only avoids a redundant
         // store write when the eased value has not visibly moved.
         if (prev != null && Math.abs(shortestAngleDelta(prev, smoothed)) < 0.5) return;
-        useSelfPoseStore.getState().setHeading(smoothed, h.accuracy ?? null);
+        useSelfPoseStore.getState().setHeading(smoothed, headingAccuracy);
       });
       if (isStale()) {
         hSub.remove();
@@ -246,9 +296,14 @@ export function useLocationTracker() {
       }
       headingSub = hSub;
 
-      const pSub = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.High, timeInterval: 4000, distanceInterval: 5 },
-        async (loc) => {
+      /**
+       * Handle one position fix.
+       *
+       * `force` bypasses the stationary-drift filter. The heartbeat needs that:
+       * its whole job is to refresh the timestamp for someone who has NOT
+       * moved, and the normal filter exists precisely to discard those.
+       */
+      const onPosition = async (loc: Location.LocationObject, force = false) => {
           if (!mounted.current) return;
 
           const { latitude, longitude, heading, speed, accuracy } = loc.coords;
@@ -265,7 +320,7 @@ export function useLocationTracker() {
             const moved = haversineMeters(prev.lat, prev.lng, latitude, longitude);
             const dt = Math.max((now - prev.t) / 1000, 1);
             const impliedSpd = moved / dt;
-            if (moved <= STATIONARY_DRIFT_M && spd <= STATIONARY_SPEED_MPS && acc >= prev.acc) return;
+            if (!force && moved <= STATIONARY_DRIFT_M && spd <= STATIONARY_SPEED_MPS && acc >= prev.acc) return;
             if (impliedSpd > MAX_SPEED_MPS && spd < 3) return;
           }
 
@@ -291,6 +346,7 @@ export function useLocationTracker() {
           lastStableHeading.current = resolvedHeading;
           lastHeadingPoint.current = { lat: latitude, lng: longitude };
           lastAccepted.current = { lat: latitude, lng: longitude, acc, spd, t: now };
+          lastFixAt.current = now;
 
           // Update map store
           useMapStore.getState().setMyLocation({ latitude, longitude, heading: resolvedHeading, accuracy: acc, speed: spd });
@@ -457,7 +513,34 @@ export function useLocationTracker() {
               }
             }
           }
-        },
+      };
+
+      /**
+       * Force a fresh fix now.
+       *
+       * Used when going live and by the heartbeat. getCurrentPositionAsync is
+       * not subject to the watcher's distanceInterval gate, so it returns even
+       * when the user has not moved — which is the entire point.
+       */
+      refreshPositionNow = async () => {
+        if (isStale()) return;
+        try {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.High,
+          });
+          await onPosition(loc, true);
+        } catch (err) {
+          console.warn('[location] forced refresh failed:', String(err));
+        }
+      };
+
+      // Get a fix immediately rather than waiting for the first watcher tick,
+      // so the map and presence are correct the moment tracking starts.
+      refreshPositionNow().catch(() => {});
+
+      const pSub = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.High, timeInterval: 4000, distanceInterval: 5 },
+        onPosition,
       );
       // Re-validate after the await: if this effect was torn down while the
       // subscription was being created, dispose it instead of storing it.
@@ -466,16 +549,38 @@ export function useLocationTracker() {
         return;
       }
       positionSub = pSub;
+
+      // ── Presence heartbeat ────────────────────────────────────────────────
+      // watchPositionAsync is gated by distanceInterval: 5. A user standing
+      // still therefore receives NO callbacks at all, so last_ping_at never
+      // refreshes and the presence policy ages them to 'stale' after 5 minutes
+      // — while they are live, in the app, and not moving. That is the
+      // "location may be stale" report.
+      //
+      // The heartbeat asks for a fresh fix whenever the last one is getting
+      // old, which both keeps presence honest AND keeps the position accurate
+      // rather than serving a fix from ten minutes ago.
+      heartbeat.current = setInterval(() => {
+        if (isStale()) return;
+        const age = Date.now() - lastFixAt.current;
+        if (age < HEARTBEAT_AFTER_MS) return;
+        refreshPositionNow?.().catch(() => {});
+      }, HEARTBEAT_CHECK_MS);
     };
 
     start();
 
     return () => {
       mounted.current = false;
+      if (heartbeat.current) {
+        clearInterval(heartbeat.current);
+        heartbeat.current = null;
+      }
       if (watchOwnerToken === token) {
         watchOwnerToken = null;
         positionSub?.remove();
         positionSub = null;
+        refreshPositionNow = null;
         headingSub?.remove();
         headingSub = null;
         headingSmoother.current.reset();

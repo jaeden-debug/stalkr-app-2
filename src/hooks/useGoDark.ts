@@ -24,6 +24,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { isDarkForCrew } from '@/utils/broadcast';
 import { logEvent } from '@/services/groupEvents';
 import { sendLocalNotification } from '@/services/notifications';
+import { requestImmediateLocationRefresh } from '@/hooks/useLocationTracker';
 
 export function useGoDark() {
   const groupBroadcastingStatus = useLocationStore((s) => s.groupBroadcastingStatus);
@@ -70,6 +71,14 @@ export function useGoDark() {
       // Flip — useLocationTracker handles the Supabase write automatically
       setIsBroadcasting(newVal);
       if (activeGroupId) setGroupBroadcasting(activeGroupId, newVal);
+
+      // Going live must publish a CURRENT position, not whatever fix happened
+      // to be in memory from before sharing was enabled. Without this the crew
+      // sees a stale point — sometimes minutes old — the instant you appear,
+      // which is the worst possible first impression for a safety app.
+      if (newVal) {
+        requestImmediateLocationRefresh().catch(() => {});
+      }
 
       // Notify the crew (realtime group_events) + a confirmation to yourself.
       const name = profile?.nickname || profile?.display_name || 'A crew member';

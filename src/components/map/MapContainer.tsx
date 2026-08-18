@@ -123,8 +123,18 @@ const MapContainerInner: React.FC = () => {
       // onPress with action 'marker-press'/'polygon-press'. Ignore those so we
       // don't clear the selection the marker just set (which made sheets unopenable).
       const action = e.nativeEvent?.action;
-      if (action === 'marker-press' || action === 'polygon-press' || action === 'callout-press') return;
-      useMapStore.getState().handleMapTap(e.nativeEvent.coordinate);
+      const st = useMapStore.getState();
+      const isPlacing =
+        st.placingMarker || st.placingPolygonZone || st.placingCircleZone || st.measuring;
+
+      // The action guard exists to stop a marker/zone tap from clearing the
+      // selection. But while PLACING, every tap is a placement — including one
+      // that lands on a zone the user is deliberately marking inside. Skipping
+      // the guard here is what makes "drop a camp pin inside my property" work.
+      if (!isPlacing && (action === 'marker-press' || action === 'polygon-press' || action === 'callout-press')) {
+        return;
+      }
+      st.handleMapTap(e.nativeEvent.coordinate);
     },
     [],
   );

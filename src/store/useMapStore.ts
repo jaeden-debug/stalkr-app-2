@@ -156,6 +156,8 @@ interface MapState {
   startMarkerPlacement: (type: MarkerType) => void;
   cancelMarkerPlacement: () => void;
   placeMarker: (coords: LatLng) => Promise<Marker | null>;
+  /** Drop the pending marker at the user's own GPS fix rather than a finger tap. */
+  placeMarkerAtMyLocation: () => Promise<Marker | null>;
   deleteMarker: (markerId: string) => Promise<boolean>;
   updateMarkerInStore: (markerId: string, updates: Partial<Marker>) => void;
   upsertMarkerInStore: (marker: Marker) => void;
@@ -432,6 +434,26 @@ export const useMapStore = create<MapState>()(
             { latitude: marker.latitude, longitude: marker.longitude }).catch(() => {});
         }
         return marker;
+      },
+
+      /**
+       * Place at the device's own position instead of a tapped point.
+       *
+       * A fingertip covers ~40-60px; at typical hunting-property zoom that is
+       * tens of metres, so "mark camp accurately" is not achievable by tapping.
+       * Using the GPS fix makes the pin as accurate as the device allows, and
+       * the accuracy is recorded so the marker can be trusted (or not) later.
+       */
+      placeMarkerAtMyLocation: async () => {
+        const loc = get().myLocation;
+        if (!loc) {
+          Alert.alert(
+            'No GPS fix yet',
+            'Waiting for your location. Try again in a moment, or tap the map to place the marker manually.',
+          );
+          return null;
+        }
+        return get().placeMarker({ latitude: loc.latitude, longitude: loc.longitude });
       },
 
       deleteMarker: async (markerId) => {

@@ -109,6 +109,17 @@ const ZonePolygonItem: React.FC<{ zoneId: string }> = memo(({ zoneId }) => {
   const zone = useMapStore((s) => s.savedPlaces.find((p) => p.id === zoneId));
   const isSelected = useMapStore((s) => s.selectedSavedPlaceId === zoneId);
   const isMoving = useMapStore((s) => s.movingZoneId === zoneId);
+  // While placing a marker or drawing a zone, the polygon must NOT be tappable.
+  //
+  // A tappable Polygon makes react-native-maps report the map tap as
+  // action 'polygon-press', and MapContainer.handleMapPress deliberately
+  // ignores that action (it exists to stop a zone tap from clearing the
+  // selection). The result: tapping inside a polygon zone to drop a marker
+  // silently did nothing — which is exactly the "can't place a marker inside my
+  // hunting property" case, since the whole property IS the polygon.
+  const isPlacing = useMapStore(
+    (s) => s.placingMarker || s.placingPolygonZone || s.placingCircleZone || s.measuring,
+  );
 
   if (!zone?.polygon_coords || zone.polygon_coords.length < 3) return null;
 
@@ -122,10 +133,10 @@ const ZonePolygonItem: React.FC<{ zoneId: string }> = memo(({ zoneId }) => {
         strokeColor={stroke}
         strokeWidth={strokeWidth}
         fillColor={fill}
-        tappable
+        tappable={!isPlacing}
         zIndex={MAP_Z_SHAPE.ZONE}
         onPress={() => {
-          if (!isMoving) useMapStore.getState().setSelectedSavedPlaceId(zoneId);
+          if (!isMoving && !isPlacing) useMapStore.getState().setSelectedSavedPlaceId(zoneId);
         }}
       />
       <ZoneLabelMarker zone={zone} coordinate={center} isSelected={isSelected} isMoving={isMoving} />
