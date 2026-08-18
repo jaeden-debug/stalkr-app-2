@@ -307,15 +307,21 @@ export const NavigationDrawer: React.FC = () => {
     if (!code) { Alert.alert('CODE REQUIRED', 'Enter an invite code.'); return; }
     setJoiningCrew(true);
     try {
-      const group = await joinByInviteCode(code);
-      if (!group) { Alert.alert('INVALID CODE', 'That invite code is invalid or expired.'); return; }
+      const result = await joinByInviteCode(code);
+      if (!result.ok) {
+        Alert.alert(
+          result.reason === 'network' ? 'CONNECTION PROBLEM' : 'INVALID CODE',
+          result.message,
+        );
+        return;
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       track({ name: 'group_joined', properties: { method: 'invite_code' } });
       setJoinCrewModal(false);
       setJoinCode('');
       setCrewsModal(false);
       sheetRef.current?.snapToIndex(0);
-      Alert.alert('CREW JOINED', `You joined ${group.name}.`);
+      Alert.alert('CREW JOINED', `You joined ${result.group.name}.`);
     } catch (e: any) {
       Alert.alert('JOIN ERROR', e?.message ?? 'Unable to join crew.');
     } finally {

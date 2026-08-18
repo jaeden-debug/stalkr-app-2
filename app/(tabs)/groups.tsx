@@ -64,15 +64,17 @@ export default function GroupsScreen() {
   const handleJoinGroup = async () => {
     if (!inviteCode.trim()) { toast.error('Enter an invite code'); return; }
     setJoining(true);
-    const group = await joinByInviteCode(inviteCode.trim().toUpperCase());
+    const result = await joinByInviteCode(inviteCode.trim().toUpperCase());
     setJoining(false);
-    if (group) {
+    if (result.ok) {
       track({ name: 'group_joined', properties: { method: 'invite_code' } });
       setShowJoinSheet(false);
       setInviteCode('');
-      toast.success(`Joined "${group.name}"!`);
+      toast.success(`Joined "${result.group.name}"!`);
     } else {
-      toast.error('Invalid or expired invite code');
+      // Say what actually went wrong — a network failure and a bad code need
+      // different actions from the user.
+      toast.error(result.message);
     }
   };
 

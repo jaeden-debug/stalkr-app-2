@@ -136,8 +136,18 @@ export default function CrewSettingsScreen() {
     Alert.alert('Leave Crew', `Leave "${group.name}"?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Leave', style: 'destructive', onPress: async () => {
-        const ok = await leaveGroup(group.id);
-        if (ok) { toast.success('Left crew'); router.back(); } else toast.error('Failed to leave');
+        // leaveGroup returns a result object now; `if (ok)` on an object is
+        // always truthy, so a refusal would have been reported as success.
+        const result = await leaveGroup(group.id);
+        if (result.ok) {
+          toast.success('Left crew');
+          router.back();
+        } else if (result.reason === 'last_owner') {
+          // Not a failure the user can retry — it needs a different action.
+          Alert.alert('You are the only owner', result.message);
+        } else {
+          toast.error(result.message);
+        }
       } },
     ]);
   };

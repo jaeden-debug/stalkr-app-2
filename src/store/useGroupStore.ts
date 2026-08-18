@@ -6,6 +6,9 @@ import * as groupService from '@/services/groups';
 import * as eventService from '@/services/groupEvents';
 import { useAuthStore } from './useAuthStore';
 
+/** Guards against a double-tapped "Create crew" producing two crews. */
+let createInFlight = false;
+
 interface GroupState {
   groups: Group[];
   activeGroupId: string | null;
@@ -19,8 +22,8 @@ interface GroupState {
 
   loadGroups: () => Promise<void>;
   createGroup: (name: string, type?: string, enforceTracking?: boolean) => Promise<Group | null>;
-  joinByInviteCode: (code: string) => Promise<Group | null>;
-  leaveGroup: (groupId: string) => Promise<boolean>;
+  joinByInviteCode: (code: string) => Promise<groupService.JoinCrewResult>;
+  leaveGroup: (groupId: string) => Promise<groupService.LeaveCrewResult>;
   deleteGroup: (groupId: string) => Promise<boolean>;
   updateGroup: (
     groupId: string,
@@ -66,6 +69,12 @@ export const useGroupStore = create<GroupState>()(
   createGroup: async (name, type = 'custom', enforceTracking = false) => {
     const userId = useAuthStore.getState().session?.user?.id;
     if (!userId) return null;
+    // Double-tapping "Create" fired two inserts and produced two crews with the
+    // same name. The guard lives in the store rather than the button so every
+    // entry point (Crews tab, nav drawer) is covered by one rule.
+    if (createInFlight) return null;
+    createInFlight = true;
+    try {
     const group = await groupService.createGroup({
       name,
       type: type as any,
@@ -77,31 +86,41 @@ export const useGroupStore = create<GroupState>()(
       await eventService.logEvent(group.id, userId, 'member_joined', `${name} created`, `Crew "${name}" was created.`);
     }
     return group;
+    } finally {
+      createInFlight = false;
+    }
   },
 
   joinByInviteCode: async (code) => {
     const userId = useAuthStore.getState().session?.user?.id;
-    if (!userId) return null;
-    const group = await groupService.joinGroupByInviteCode(code, userId);
-    if (group) {
-      set((s) => {
-        const exists = s.groups.find((g) => g.id === group.id);
-        return {
-          groups: exists ? s.groups : [group, ...s.groups],
-          activeGroupId: group.id,
-        };
-      });
+    if (!userId) {
+      return { ok: false, reason: 'auth_required', message: 'Sign in to join a crew.' };
+    }
+
+    const result = await groupService.joinCrewByInviteCode(code);
+    if (!result.ok) return result;
+
+    const { group } = result;
+    // Idempotent in the store as well as the database: re-accepting an invite
+    // must not add a second copy of the crew to the list.
+    const alreadyMember = get().groups.some((g) => g.id === group.id);
+    set((s) => ({
+      groups: alreadyMember ? s.groups : [group, ...s.groups],
+      activeGroupId: group.id,
+    }));
+
+    if (!alreadyMember) {
       await eventService.logEvent(group.id, userId, 'member_joined', 'Member joined', `A new member joined ${group.name}.`);
     }
-    return group;
+    return result;
   },
 
   leaveGroup: async (groupId) => {
     const userId = useAuthStore.getState().session?.user?.id;
-    if (!userId) return false;
+    if (!userId) return { ok: false, reason: 'error', message: 'Sign in first.' };
     const group = get().groups.find((g) => g.id === groupId);
-    const ok = await groupService.leaveGroup(groupId, userId);
-    if (ok) {
+    const result = await groupService.leaveCrew(groupId);
+    if (result.ok) {
       set((s) => {
         const groups = s.groups.filter((g) => g.id !== groupId);
         return {
@@ -113,7 +132,7 @@ export const useGroupStore = create<GroupState>()(
         await eventService.logEvent(groupId, userId, 'member_left', 'Member left', `A member left ${group.name}.`);
       }
     }
-    return ok;
+    return result;
   },
 
   deleteGroup: async (groupId) => {
@@ -141,16 +160,16 @@ export const useGroupStore = create<GroupState>()(
   },
 
   setActiveGroupId: (id) => {
+    // Deliberately does NOT touch broadcasting state.
+    //
+    // This used to mirror the per-crew flag into the global isBroadcasting flag
+    // and DEFAULT IT TO TRUE when a crew had no saved entry — so simply
+    // switching to a crew you had never opted into marked you as broadcasting,
+    // contradicting the default-dark posture.
+    //
+    // Broadcasting is now decided in exactly one place, from the per-crew map
+    // plus crew policy: utils/broadcast.ts. There is nothing to mirror.
     set({ activeGroupId: id });
-    // Restore per-group broadcasting state
-    if (id) {
-      // Import lazily to avoid circular dep
-      const { useLocationStore } = require('./useLocationStore');
-      const groupBroadcastingStatus = useLocationStore.getState().groupBroadcastingStatus;
-      const saved = groupBroadcastingStatus[id];
-      const newBroadcasting = saved !== undefined ? saved : true; // default true if no saved state
-      useLocationStore.getState().setIsBroadcasting(newBroadcasting);
-    }
   },
 
   loadGroupMembers: async (groupId) => {

@@ -75,12 +75,14 @@ export default function InviteScreen() {
   const handleJoin = async () => {
     if (!code) return;
     setPhase('joining');
-    const group = await joinByInviteCode(code.toUpperCase());
-    if (group) {
+    const result = await joinByInviteCode(code.toUpperCase());
+    if (result.ok) {
+      // Joining is idempotent server-side, so an already-a-member tap lands
+      // here too and simply opens the map — it is no longer reported as failure.
       track({ name: 'group_joined', properties: { method: 'invite_code' } });
       router.replace('/(tabs)/map');
     } else {
-      setErrorMsg('Failed to join crew. You may already be a member.');
+      setErrorMsg(result.message);
       setPhase('error');
     }
   };
