@@ -99,6 +99,8 @@ export function useRealtimeGroup() {
     const myId = myUserId;
     const generation = ++loadGeneration.current;
     const channelName = `group_${gid}_${Date.now()}`;
+    /** Set when the socket drops, so we know a resubscribe is a RECONNECT. */
+    let hadDisconnect = false;
 
     // 1. Clear ONLY on a genuine crew change (see header note).
     if (useMapStore.getState().populationGroupId !== gid) {
@@ -107,7 +109,7 @@ export function useRealtimeGroup() {
 
     // 2. Load the whole population, then install it in one atomic write so the
     //    user never sees a partially-filled or empty map for the active crew.
-    (async () => {
+    const loadPopulation = async () => {
       const [markers, savedPlaces, liveRows] = await Promise.all([
         fetchGroupMarkers(gid).catch(() => []),
         fetchGroupSavedPlaces(gid).catch(() => []),
@@ -125,8 +127,9 @@ export function useRealtimeGroup() {
       }
 
       useMapStore.getState().commitPopulation(gid, { markers, savedPlaces, crewLocations });
-    })();
+    };
 
+    loadPopulation();
     useGroupStore.getState().loadGroupMembers(gid);
 
     // 3. Realtime subscriptions.
@@ -234,13 +237,30 @@ export function useRealtimeGroup() {
         },
       )
       .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          console.warn('[realtime] channel error, will retry');
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn('[realtime] channel down:', status);
+          hadDisconnect = true;
           // A channel error can mean we lost read access to this crew (removed
           // by an admin), not just a transient network fault. Re-verifying
           // membership is cheap and is the only way the app learns it was
           // removed while open.
           useGroupStore.getState().loadGroups();
+          return;
+        }
+
+        if (status === 'SUBSCRIBED' && hadDisconnect) {
+          hadDisconnect = false;
+          // ── Reconnect reconciliation ──────────────────────────────────────
+          // Realtime does not replay events missed while the socket was down,
+          // so whatever changed in that window is invisible to us. Refetch the
+          // authoritative state rather than trusting the incremental stream.
+          //
+          // Safe to do unconditionally: commitPopulation installs atomically
+          // and rejects a response whose crew is no longer active, so there is
+          // no empty-map flash and no cross-crew flash. Per-member ordering
+          // still applies, so a refetch cannot roll a marker backwards either.
+          loadPopulation();
+          useGroupStore.getState().loadGroupMembers(gid);
         }
       });
 
@@ -250,7 +270,11 @@ export function useRealtimeGroup() {
     // changed without us hearing about it — realtime does not deliver events
     // for rows we can no longer read.
     const onAppState = (next: AppStateStatus) => {
-      if (next === 'active') useGroupStore.getState().loadGroups();
+      if (next !== 'active') return;
+      // Backgrounded apps miss realtime events even when the socket never
+      // formally errored, so treat a foreground as a reconnect too.
+      useGroupStore.getState().loadGroups();
+      loadPopulation();
     };
     const appStateSub = AppState.addEventListener('change', onAppState);
 

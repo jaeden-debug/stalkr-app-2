@@ -1,6 +1,9 @@
 /**
- * Writes trail points to Supabase when the user moves beyond thresholds.
- * Reads location from store — does NOT create its own GPS watch.
+ * Writes trail points to Supabase when movement is worth recording.
+ * Reads location from the store — does NOT create its own GPS watch.
+ *
+ * The sampling decision lives in utils/trailPolicy.ts so it is testable without
+ * a device. See that file for why the old distance-AND-time gate erased corners.
  */
 import { useEffect, useRef } from 'react';
 import { useMapStore } from '@/store/useMapStore';
@@ -9,55 +12,81 @@ import { useGroupStore } from '@/store/useGroupStore';
 import { useLocationStore } from '@/store/useLocationStore';
 import { insertTrailPoint } from '@/services/trails';
 import { isUuid } from '@/utils/async';
-
-const MIN_DIST_M = 18;
-const MIN_TIME_MS = 90_000;
-
-function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371e3;
-  const p1 = (lat1 * Math.PI) / 180;
-  const p2 = (lat2 * Math.PI) / 180;
-  const dp = ((lat2 - lat1) * Math.PI) / 180;
-  const dl = ((lon2 - lon1) * Math.PI) / 180;
-  const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+import { isBroadcastingToCrew } from '@/utils/broadcast';
+import { decideTrailPoint, type TrailAnchor } from '@/utils/trailPolicy';
 
 export function useTrailWriter() {
-  const lastWrite = useRef<{ lat: number; lng: number; t: number } | null>(null);
+  const anchor = useRef<TrailAnchor | null>(null);
   const inFlight = useRef(false);
   const myLocation = useMapStore((s) => s.myLocation);
-  const isBroadcasting = useLocationStore((s) => s.isBroadcasting);
+
+  // Gate on the SAME expression the location tracker uses. This previously read
+  // useLocationStore.isBroadcasting — the vestigial global flag, which defaults
+  // to false and is no longer the source of truth, so trails silently never
+  // recorded until the user happened to toggle Go Dark twice.
+  const activeGroupId = useGroupStore((s) => s.activeGroupId);
+  const enforced = useGroupStore(
+    (s) => s.groups.find((g) => g.id === s.activeGroupId)?.tracking_mode === 'enforced',
+  );
+  const sharing = useLocationStore((s) =>
+    isBroadcastingToCrew(s.groupBroadcastingStatus, activeGroupId, { enforced }),
+  );
 
   useEffect(() => {
-    if (!myLocation || !isBroadcasting) return;
+    if (!myLocation) return;
+
+    // Going dark stops NEW shared points. Existing ones are deliberately kept:
+    // the path leading up to someone's last known position is the most useful
+    // thing about a dark user. The anchor is cleared so resuming later starts a
+    // fresh segment rather than drawing a line across the dark period.
+    if (!sharing) {
+      anchor.current = null;
+      return;
+    }
+
     const userId = useAuthStore.getState().session?.user?.id;
-    const groupId = useGroupStore.getState().activeGroupId;
+    const groupId = activeGroupId;
     if (!userId || !isUuid(groupId)) return;
-
-    const { latitude, longitude, heading } = myLocation;
-    const now = Date.now();
-    const prev = lastWrite.current;
-
-    const distOk = !prev || haversine(prev.lat, prev.lng, latitude, longitude) >= MIN_DIST_M;
-    const timeOk = !prev || now - prev.t >= MIN_TIME_MS;
-
-    if ((!distOk || !timeOk) && prev) return;
     if (inFlight.current) return;
 
+    const decision = decideTrailPoint(anchor.current, {
+      latitude: myLocation.latitude,
+      longitude: myLocation.longitude,
+      accuracy: myLocation.accuracy,
+      speed: myLocation.speed ?? null,
+      heading: myLocation.heading,
+      timestamp: Date.now(),
+    });
+
+    if (!decision.record) return;
+
+    const point: TrailAnchor = {
+      latitude: myLocation.latitude,
+      longitude: myLocation.longitude,
+      heading: myLocation.heading,
+      timestamp: Date.now(),
+    };
+    anchor.current = point;
     inFlight.current = true;
-    lastWrite.current = { lat: latitude, lng: longitude, t: now };
 
     insertTrailPoint({
       group_id: groupId!,
       user_id: userId,
-      latitude,
-      longitude,
-      heading,
-    })
-      .catch(console.error)
+      latitude: point.latitude,
+      longitude: point.longitude,
+      heading: myLocation.heading,
+      speed: myLocation.speed ?? null,
+      accuracy: myLocation.accuracy,
+    } as never)
+      .catch((err) => {
+        // Roll the anchor back so the next fix is judged against the last
+        // SUCCESSFULLY written point — otherwise a failed write silently
+        // creates a hole the policy thinks it already filled.
+        anchor.current = null;
+        console.error('[trail] insert failed:', err);
+      })
       .finally(() => {
         inFlight.current = false;
       });
-  }, [myLocation]);
+  }, [myLocation, sharing, activeGroupId]);
 }
