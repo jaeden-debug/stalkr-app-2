@@ -4,7 +4,7 @@
  * Crew markers only rerender on their own data changes.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import MapView, { PROVIDER_GOOGLE, Marker, Polyline, Polygon, Circle } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -137,7 +137,14 @@ export const MapContainer: React.FC = () => {
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFill}
-        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+        // Google Maps on BOTH platforms. iOS previously fell through to Apple
+        // Maps (provider=undefined), whose marker view manager does not export
+        // `rotation`, `flat`, `anchor` or `tracksViewChanges` — so the self /
+        // crew heading arrows silently never rotated and pin anchors were
+        // ignored. The Google iOS SDK was already linked (ios/Podfile installs
+        // `react-native-maps/Google`, Podfile.lock pins GoogleMaps 9.4.0) and
+        // keyed via `iosGoogleMapsApiKey` in app.config.ts — it was just unused.
+        provider={PROVIDER_GOOGLE}
         mapType={isSatellite ? 'hybrid' : 'standard'}
         initialRegion={MAP_CONSTANTS.DEFAULT_REGION}
         onMapReady={() => setMapReady(true)}
