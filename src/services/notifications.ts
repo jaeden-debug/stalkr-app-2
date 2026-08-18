@@ -68,6 +68,15 @@ export async function setupAndroidChannels(): Promise<void> {
     name: 'Safety Alerts',
     importance: Notifications.AndroidImportance.HIGH,
   });
+  // useRealtimeGroup routes crew zone activity here. The channel was never
+  // registered, so those notifications silently fell back to 'default' and
+  // could not be muted separately in Android settings — which is the whole
+  // point of giving them their own channel.
+  await Notifications.setNotificationChannelAsync('zone_crew', {
+    name: 'Crew Activity',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    vibrationPattern: [0, 200],
+  });
 }
 
 export async function registerPushToken(userId: string): Promise<string | null> {
@@ -221,6 +230,9 @@ export async function unregisterPushToken(userId: string, token: string | null):
   }
 }
 
+/** Android channels this app actually creates — see registerNotificationChannels. */
+const ANDROID_CHANNELS = new Set(['default', 'zone_alerts', 'sos', 'safety', 'zone_crew']);
+
 export async function sendLocalNotification(
   title: string,
   body: string,
@@ -228,10 +240,39 @@ export async function sendLocalNotification(
   channelId?: string,
 ): Promise<void> {
   try {
+    // `identifier` is the notification's UNIQUE ID, not the Android channel.
+    // Passing the channel there caused two separate failures:
+    //
+    //  1. Every notification sharing a channel name shared an identifier, so
+    //     each new one REPLACED the last. Four call sites pass 'sos' and three
+    //     pass 'safety' — an SOS-cancelled confirmation silently overwrote the
+    //     SOS-activated one.
+    //  2. The channel was never applied at all, so Android delivered these on
+    //     the default channel. The 'sos' and 'zone_alerts' channels are created
+    //     with AndroidImportance.MAX specifically so they break through as
+    //     heads-up alerts; that was being thrown away.
+    //
+    // channelId belongs on the TRIGGER. `trigger: null` fires immediately but
+    // carries no channel, so Android targets use a 1-second interval trigger —
+    // the shortest schedulable form that accepts one.
+    const useChannel =
+      Platform.OS === 'android' && channelId && ANDROID_CHANNELS.has(channelId);
+
+    if (__DEV__ && channelId && !ANDROID_CHANNELS.has(channelId)) {
+      // e.g. 'zone_crew' is passed by useRealtimeGroup but no such channel is
+      // registered, so it would silently fall back.
+      console.warn(`[notifications] unknown Android channel "${channelId}" — falling back to default`);
+    }
+
     await Notifications.scheduleNotificationAsync({
       content: { title, body, data: data ?? {}, sound: 'default' },
-      trigger: null,
-      ...(channelId ? { identifier: channelId } : {}),
+      trigger: useChannel
+        ? {
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: 1,
+            channelId: channelId as string,
+          }
+        : null,
     });
   } catch (err) {
     console.error('[notifications] Local notification error:', err);
