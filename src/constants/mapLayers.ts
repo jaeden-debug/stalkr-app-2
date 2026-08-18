@@ -61,3 +61,31 @@ export const MAP_Z_MARKER = {
   /** Anything mid-drag floats above all else so it is never lost under a peer. */
   DRAGGING: 120,
 } as const;
+
+
+/**
+ * Vertical stacking of the map's bottom-anchored overlays, in points above the
+ * safe-area inset.
+ *
+ * These previously lived as bare numbers inside each component, which is how
+ * the overdue-journey prompt ended up rendered UNDERNEATH the SOS button and
+ * the check-in badge: nothing declared what space was already taken. Anything
+ * new that anchors to the bottom of the map belongs here, positioned relative
+ * to what is already there.
+ *
+ * Measured footprints:
+ *   check-in badge  bottom 140, pill ~44 tall  -> occupies to ~184
+ *   SOS button      bottom 148, ring 78 tall   -> occupies to ~226
+ */
+export const MAP_BOTTOM_STACK = {
+  /** Check-in / safety countdown pill. */
+  CHECK_IN: 140,
+  /** SOS press-and-hold ring. */
+  SOS: 148,
+  /**
+   * Overdue-journey prompt. Sits clear of the SOS ring's top edge (226) so the
+   * two never overlap — this is a card with buttons, and a button hidden behind
+   * the SOS ring is a button that cannot be pressed.
+   */
+  JOURNEY_PROMPT: 236,
+} as const;

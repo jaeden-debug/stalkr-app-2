@@ -29,7 +29,7 @@ import React, {
 import {
   Alert,
   Animated,
-  Dimensions,
+  useWindowDimensions,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -69,9 +69,11 @@ import { C } from '@/constants/theme';
 import type { GroupMember } from '@/types/models';
 import type { MarkerType } from '@/types/database';
 
-const { height: SCREEN_H } = Dimensions.get('window');
+// Read per-render via useWindowDimensions rather than captured once at module
+// load — a module-scope Dimensions.get() is stale after rotation, in
+// split-screen, and on foldables.
 const COLLAPSED_H = 118;
-const EXPANDED_H = Math.round(SCREEN_H * 0.75); // slides 3/4 up the viewport
+
 
 // Places Autocomplete uses the Google Places web API — needs a key with the
 // Places API enabled. Falls back to the iOS maps key if the general one is unset.
@@ -159,7 +161,11 @@ export const NavigationDrawer: React.FC = () => {
     return () => { _sheetRef = null; };
   }, []);
 
-  const snapPoints = useMemo(() => [COLLAPSED_H, EXPANDED_H], []);
+  const { height: screenH } = useWindowDimensions();
+  // Recomputed when the viewport changes, so the drawer still snaps to 3/4 of
+  // the CURRENT screen rather than whatever it was when the app launched.
+  const expandedH = useMemo(() => Math.round(screenH * 0.75), [screenH]);
+  const snapPoints = useMemo(() => [COLLAPSED_H, expandedH], [expandedH]);
   const [idx, setIdx]               = useState(0);
   const [markerModal, setMarkerModal] = useState(false);
   const [zoneModal, setZoneModal]     = useState(false);
@@ -756,7 +762,7 @@ export const NavigationDrawer: React.FC = () => {
       {/* ── CREWS SWITCHER SHEET ── */}
       <Modal visible={crewsModal} transparent animationType="slide" onRequestClose={() => setCrewsModal(false)}>
         <View style={mod.backdrop}>
-          <BlurView intensity={95} tint="dark" style={[mod.sheet, { maxHeight: SCREEN_H * 0.8 }]}>
+          <BlurView intensity={95} tint="dark" style={[mod.sheet, { maxHeight: screenH * 0.8 }]}>
             <View style={mod.handle}><View style={mod.handleBar} /></View>
             <Text style={[mod.title, { color: C.green }]}>YOUR CREWS</Text>
             <Text style={mod.sub}>Switch between crews or start a new one.</Text>
@@ -846,7 +852,7 @@ export const NavigationDrawer: React.FC = () => {
       {/* ── NEW JOURNEY SHEET ── */}
       <Modal visible={journeyModal} transparent animationType="slide" onRequestClose={() => setJourneyModal(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={mod.backdrop}>
-          <BlurView intensity={95} tint="dark" style={[mod.sheet, { maxHeight: SCREEN_H * 0.82 }]}>
+          <BlurView intensity={95} tint="dark" style={[mod.sheet, { maxHeight: screenH * 0.82 }]}>
             <View style={mod.handle}><View style={mod.handleBar} /></View>
             <Text style={[mod.title, { color: C.blue }]}>NEW JOURNEY SESSION</Text>
             <Text style={mod.sub}>Share a live session to a destination.</Text>

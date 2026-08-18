@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import {
   Animated,
-  Dimensions,
+  useWindowDimensions,
   Modal,
   StyleSheet,
   Text,
@@ -22,7 +22,11 @@ interface SheetProps {
   showHandle?: boolean;
 }
 
-const SCREEN_HEIGHT = Dimensions.get('window').height;
+// Deliberately NOT Dimensions.get() at module scope: that is evaluated once, on
+// first import, and never again. It is then wrong after rotation, in
+// split-screen, on a foldable, and on any device where the window is measured
+// after the module loads — the sheet animates to an off-screen position that no
+// longer matches the viewport.
 
 export const Sheet: React.FC<SheetProps> = ({
   visible,
@@ -33,7 +37,8 @@ export const Sheet: React.FC<SheetProps> = ({
   closeOnBackdrop = true,
   showHandle = true,
 }) => {
-  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const { height: screenHeight } = useWindowDimensions();
+  const translateY = useRef(new Animated.Value(screenHeight)).current;
 
   useEffect(() => {
     if (visible) {
@@ -45,7 +50,7 @@ export const Sheet: React.FC<SheetProps> = ({
       }).start();
     } else {
       Animated.timing(translateY, {
-        toValue: SCREEN_HEIGHT,
+        toValue: screenHeight,
         duration: 200,
         useNativeDriver: true,
       }).start();
@@ -54,7 +59,7 @@ export const Sheet: React.FC<SheetProps> = ({
 
   const sheetHeight =
     snapHeight === 'full'
-      ? SCREEN_HEIGHT * 0.92
+      ? screenHeight * 0.92
       : snapHeight === 'auto'
       ? undefined
       : snapHeight;

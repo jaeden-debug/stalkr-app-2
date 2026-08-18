@@ -21,12 +21,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSessionStore } from '@/store/useSessionStore';
 import { supabase } from '@/services/supabase';
 import { C } from '@/constants/theme';
+import { MAP_BOTTOM_STACK } from '@/constants/mapLayers';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const JourneyOverduePrompt: React.FC = () => {
   const session = useSessionStore((s) => s.activeJourneySession);
   const extendEta = useSessionStore((s) => s.extendJourneyEta);
   const markArrived = useSessionStore((s) => s.markArrived);
   const [busy, setBusy] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const sessionId = session?.id ?? null;
   const state = session?.overdue_state ?? 'none';
@@ -77,7 +80,16 @@ export const JourneyOverduePrompt: React.FC = () => {
   const alerted = state === 'alerted';
 
   return (
-    <View style={[styles.wrap, alerted && styles.wrapAlerted]}>
+    <View
+      style={[
+        styles.wrap,
+        // Above the SOS ring and the check-in badge, and clear of the home
+        // indicator / gesture bar. Previously a bare bottom:96, which put this
+        // card's buttons underneath the SOS button.
+        { bottom: MAP_BOTTOM_STACK.JOURNEY_PROMPT + insets.bottom },
+        alerted && styles.wrapAlerted,
+      ]}
+    >
       <View style={styles.row}>
         <Ionicons
           name={alerted ? 'alert-circle' : 'time-outline'}
@@ -119,7 +131,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 12,
     right: 12,
-    bottom: 96,
     padding: 16,
     borderRadius: 14,
     borderWidth: 1,
