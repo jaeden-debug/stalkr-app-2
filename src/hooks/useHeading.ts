@@ -1,39 +1,45 @@
-import * as Location from 'expo-location';
-import { useEffect, useRef, useState } from 'react';
+/**
+ * useHeading — read-only view of the device compass for UI consumers.
+ *
+ * This hook used to open its OWN Location.watchHeadingAsync subscription (and
+ * request permissions again), so with TacticalHud mounted the app ran two
+ * concurrent magnetometer streams. There is now exactly one heading watcher,
+ * owned by useLocationTracker, which publishes into useSelfPoseStore. This hook
+ * is a pure consumer of that store and starts no sensors of its own.
+ */
+import { useSelfPoseStore } from '@/store/useSelfPoseStore';
+import { degreesToCardinal } from '@/utils/heading';
 
 export interface HeadingData {
+  /** Smoothed heading in degrees, or null when the compass is unavailable. */
+  heading: number | null;
+  /**
+   * Kept for backwards compatibility with existing HUD code. Reads the same
+   * smoothed value; the app no longer distinguishes magnetic from true north at
+   * the UI layer because useLocationTracker already prefers trueHeading and
+   * falls back to magHeading at the source.
+   */
   magHeading: number;
   trueHeading: number;
+  /** Cardinal abbreviation (N, NE, E…), or '--' when heading is unknown. */
   direction: string;
+  /** False when no trustworthy compass reading exists — do not render a bearing. */
+  available: boolean;
 }
 
-const DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-
 export function useHeading(): HeadingData {
-  const [heading, setHeading] = useState<HeadingData>({ magHeading: 0, trueHeading: 0, direction: 'N' });
-  const sub = useRef<Location.LocationSubscription | null>(null);
+  const heading = useSelfPoseStore((s) => s.heading);
 
-  useEffect(() => {
-    let mounted = true;
+  if (heading == null) {
+    return { heading: null, magHeading: 0, trueHeading: 0, direction: '--', available: false };
+  }
 
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted' || !mounted) return;
-
-      sub.current = await Location.watchHeadingAsync((data) => {
-        if (!mounted) return;
-        const deg = Math.round(data.magHeading);
-        const dir = DIRECTIONS[Math.round(deg / 45) % 8];
-        setHeading({ magHeading: deg, trueHeading: Math.round(data.trueHeading ?? deg), direction: dir });
-      });
-    })();
-
-    return () => {
-      mounted = false;
-      sub.current?.remove();
-      sub.current = null;
-    };
-  }, []);
-
-  return heading;
+  const rounded = Math.round(heading);
+  return {
+    heading,
+    magHeading: rounded,
+    trueHeading: rounded,
+    direction: degreesToCardinal(rounded),
+    available: true,
+  };
 }

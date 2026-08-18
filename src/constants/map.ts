@@ -43,12 +43,22 @@ export const CREW_COLORS = [
 
 export type CrewColor = (typeof CREW_COLORS)[number];
 
-/** Assign stable color index from userId */
-export function getCrewColor(userId: string): CrewColor {
+/**
+ * Stable palette index for a userId.
+ *
+ * Exported so the generated cone artwork (mapMarkerImages.ts) can be picked by
+ * the same index that chooses the colour — otherwise a member's cone and badge
+ * could disagree.
+ */
+export function getCrewColorIndex(userId: string): number {
   let hash = 0;
   for (let i = 0; i < userId.length; i++) {
     hash = userId.charCodeAt(i) + ((hash << 5) - hash);
   }
-  const index = Math.abs(hash) % CREW_COLORS.length;
-  return CREW_COLORS[index];
+  return Math.abs(hash) % CREW_COLORS.length;
+}
+
+/** Assign stable color from userId */
+export function getCrewColor(userId: string): CrewColor {
+  return CREW_COLORS[getCrewColorIndex(userId)];
 }

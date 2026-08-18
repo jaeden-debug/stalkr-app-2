@@ -28,7 +28,10 @@ export const MapContainer: React.FC = () => {
 
   const isSatellite = useMapStore((s) => s.isSatellite);
   const centerTrigger = useMapStore((s) => s.centerTrigger);
-  const myLocation = useMapStore((s) => s.myLocation);
+  // Boolean, not the location object: this only needs to know WHEN the first
+  // fix lands so it can auto-centre once. Subscribing to `myLocation` itself
+  // re-rendered the whole map subtree on every position update.
+  const hasFix = useMapStore((s) => s.myLocation != null);
   const userId = useAuthStore((s) => s.user?.id);
   const polygonDraftPoints = useMapStore((s) => s.polygonDraftPoints);
   const placingPolygonZone = useMapStore((s) => s.placingPolygonZone);
@@ -61,12 +64,12 @@ export const MapContainer: React.FC = () => {
   // (Calling animateToRegion before the native map is laid out silently no-ops,
   // which is why the marker used to stay off-screen until CENTER was pressed.)
   useEffect(() => {
-    if (mapReady && myLocation && !hasAutocentered.current) {
+    if (mapReady && hasFix && !hasAutocentered.current) {
       hasAutocentered.current = true;
       // next tick so the first layout pass has fully settled
       requestAnimationFrame(() => centerOnMe(800));
     }
-  }, [mapReady, myLocation, centerOnMe]);
+  }, [mapReady, hasFix, centerOnMe]);
 
   useEffect(() => {
     if (centerTrigger > 0 && mapReady) centerOnMe(600);
@@ -276,14 +279,9 @@ export const MapContainer: React.FC = () => {
         <RallyPointMarker />
         <MarkerLayer />
         <CrewMarkerLayer myUserId={userId ?? ''} />
-        {myLocation && userId && (
-          <SelfMarker
-            userId={userId}
-            latitude={myLocation.latitude}
-            longitude={myLocation.longitude}
-            heading={myLocation.heading}
-          />
-        )}
+        {/* Self-contained: subscribes to its own position/heading/selection so
+            this container never re-renders on GPS or compass activity. */}
+        <SelfMarker />
       </MapView>
 
       <MapControls />

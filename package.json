@@ -12,7 +12,8 @@
     "submit:ios": "eas submit --platform ios",
     "submit:android": "eas submit --platform android",
     "lint": "eslint . --ext .ts,.tsx",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "assets:markers": "node scripts/generate-map-marker-assets.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",

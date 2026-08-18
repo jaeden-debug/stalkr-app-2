@@ -14,6 +14,8 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useLocationStore } from '@/store/useLocationStore';
 import { useMapStore } from '@/store/useMapStore';
+import { useSelfPoseStore } from '@/store/useSelfPoseStore';
+import { createHeadingSmoother, shortestAngleDelta } from '@/utils/heading';
 import { upsertLiveLocation, setLocationOffline } from '@/services/liveLocations';
 import { isInsideCircle } from '@/utils/distance';
 import { isInsidePolygon } from '@/utils/polygon';
@@ -34,9 +36,30 @@ const STATIONARY_SPEED_MPS = 0.8;
 const STATIONARY_DRIFT_M = 12;
 const MAX_SPEED_MPS = 45;
 
-let globalWatch: Location.LocationSubscription | null = null;
-let globalWatchOwner: number | null = null;
-let instanceCounter = 0;
+// ── Sensor ownership ────────────────────────────────────────────────────────
+// Exactly one position watcher and one heading watcher may exist at a time.
+//
+// The previous guard checked `if (globalWatch && ...) return;` but only
+// assigned `globalWatch` AFTER two awaits inside an async start(). Two hook
+// instances mounting in the same tick therefore both saw null, both passed the
+// guard, and both called watchPositionAsync — and since only the last
+// assignment was retained, the first subscription leaked permanently.
+//
+// Ownership is now claimed SYNCHRONOUSLY with a token, before any await, and
+// re-validated after each await so a subscription created by a losing or
+// unmounted instance is disposed rather than stored.
+let watchOwnerToken: symbol | null = null;
+let positionSub: Location.LocationSubscription | null = null;
+let headingSub: Location.LocationSubscription | null = null;
+
+/** Test-only introspection for the sensor-lifecycle regression tests. */
+export function __getSensorSubscriptionCounts() {
+  return {
+    position: positionSub ? 1 : 0,
+    heading: headingSub ? 1 : 0,
+    owned: watchOwnerToken !== null,
+  };
+}
 
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371e3;
@@ -58,15 +81,14 @@ function calcBearing(lat1: number, lon1: number, lat2: number, lon2: number): nu
 }
 
 export function useLocationTracker() {
-  const instanceId = useRef(++instanceCounter);
   const lastAccepted = useRef<{ lat: number; lng: number; acc: number; spd: number; t: number } | null>(null);
   const lastHeadingPoint = useRef<{ lat: number; lng: number } | null>(null);
   const lastStableHeading = useRef(0);
-  // Device-compass heading (where the top of the phone points) — drives the
-  // marker like Apple/Google Maps, in real time, independent of GPS movement.
-  const compassHeading = useRef<number | null>(null);
-  const headingSub = useRef<Location.LocationSubscription | null>(null);
-  const lastHeadingStoreUpdate = useRef(0);
+  // Circular low-pass over the raw magnetometer. Compass readings swing ±5–15°
+  // indoors, so the unfiltered value made the puck shiver while standing still.
+  // Averaging plain numbers would be wrong across the 0/360 seam, so the
+  // smoother always moves along the shortest arc.
+  const headingSmoother = useRef(createHeadingSmoother({ alpha: 0.25, deadbandDeg: 1.5, snapDeg: 25 }));
   const lastLiveWritePerGroup = useRef<Record<string, number>>({});
   const offlineMarkedGroups = useRef<Set<string>>(new Set());
   const lastTrailWrite = useRef<{ lat: number; lng: number; t: number } | null>(null);
@@ -171,39 +193,54 @@ export function useLocationTracker() {
 
   useEffect(() => {
     mounted.current = true;
-    const myInstanceId = instanceId.current;
 
-    if (globalWatch && globalWatchOwner !== myInstanceId) return;
+    // Claim ownership synchronously — before any await — so a second instance
+    // mounting in the same tick cannot race through this guard.
+    if (watchOwnerToken !== null) return;
+    const token = Symbol('stalkr.locationWatch');
+    watchOwnerToken = token;
+
+    /** True once this effect is torn down or ownership has moved on. */
+    const isStale = () => !mounted.current || watchOwnerToken !== token;
 
     const start = async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted' || !mounted.current) return;
+      if (status !== 'granted' || isStale()) {
+        if (watchOwnerToken === token) watchOwnerToken = null;
+        return;
+      }
 
-      globalWatchOwner = myInstanceId;
+      // ── Compass watch: rotates the self puck to the phone's facing direction
+      // in real time. Fires far more often than GPS and works while stationary.
+      //
+      // Publishes to useSelfPoseStore, NOT useMapStore. Writing heading into the
+      // map collection store re-rendered MarkerLayer and ZoneLayer ~10x/second
+      // because Zustand compares with Object.is and those layers subscribe to
+      // the same store. Nothing but the puck and the HUD reads heading now.
+      const hSub = await Location.watchHeadingAsync((h) => {
+        if (isStale()) return;
+        // trueHeading is relative to geographic north, which is what the map's
+        // marker rotation expects. It reads -1 until a location fix exists, so
+        // fall back to magnetic north until then.
+        const raw = h.trueHeading != null && h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+        if (!isFinite(raw)) return;
 
-      // ── Compass watch: rotate the self marker to the phone's facing direction
-      // in real time (like Apple/Google Maps). Fires far more often than the GPS
-      // watch and works while stationary, so the marker turns as you turn.
-      headingSub.current = await Location.watchHeadingAsync((h) => {
-        if (!mounted.current) return;
-        // trueHeading is relative to geographic north (map is north-up); it's -1
-        // until a location fix exists, so fall back to magnetic north.
-        const deg = h.trueHeading != null && h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
-        if (!isFinite(deg)) return;
-        compassHeading.current = deg;
+        const smoothed = headingSmoother.current.push(raw);
+        if (smoothed == null) return;
 
-        const now = Date.now();
-        if (now - lastHeadingStoreUpdate.current < 100) return; // ~10fps cap
-        const cur = useMapStore.getState().myLocation;
-        if (!cur) return;
-        // Only push when the angle actually moved (smallest signed diff ≥ 2°).
-        const diff = Math.abs(((deg - cur.heading + 540) % 360) - 180);
-        if (diff < 2) return;
-        lastHeadingStoreUpdate.current = now;
-        useMapStore.getState().setMyLocation({ ...cur, heading: deg });
+        const prev = useSelfPoseStore.getState().heading;
+        // The smoother already applies a deadband; this only avoids a redundant
+        // store write when the eased value has not visibly moved.
+        if (prev != null && Math.abs(shortestAngleDelta(prev, smoothed)) < 0.5) return;
+        useSelfPoseStore.getState().setHeading(smoothed, h.accuracy ?? null);
       });
+      if (isStale()) {
+        hSub.remove();
+        return;
+      }
+      headingSub = hSub;
 
-      globalWatch = await Location.watchPositionAsync(
+      const pSub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.High, timeInterval: 4000, distanceInterval: 5 },
         async (loc) => {
           if (!mounted.current) return;
@@ -226,12 +263,15 @@ export function useLocationTracker() {
             if (impliedSpd > MAX_SPEED_MPS && spd < 3) return;
           }
 
-          // Resolve heading — mirror Apple/Google Maps: the marker faces wherever
-          // the top of the phone points (compass). GPS course-over-ground is only
-          // a fallback for when the compass isn't available yet.
+          // Resolve heading for BROADCAST and display only — the self puck reads
+          // the live compass straight from useSelfPoseStore and never waits for
+          // a GPS tick. The device compass stays the primary source (the puck
+          // faces where the phone faces); GPS course-over-ground and a computed
+          // bearing remain fallbacks for when no compass reading exists.
+          const compassHeading = headingSmoother.current.value();
           let resolvedHeading: number;
-          if (compassHeading.current != null) {
-            resolvedHeading = compassHeading.current;
+          if (compassHeading != null) {
+            resolvedHeading = compassHeading;
           } else if (heading != null && heading >= 0 && heading !== 0) {
             resolvedHeading = heading;
           } else if (lastHeadingPoint.current) {
@@ -403,19 +443,30 @@ export function useLocationTracker() {
           }
         },
       );
+      // Re-validate after the await: if this effect was torn down while the
+      // subscription was being created, dispose it instead of storing it.
+      if (isStale()) {
+        pSub.remove();
+        return;
+      }
+      positionSub = pSub;
     };
 
     start();
 
     return () => {
       mounted.current = false;
-      if (globalWatchOwner === myInstanceId) {
-        globalWatch?.remove();
-        globalWatch = null;
-        globalWatchOwner = null;
+      if (watchOwnerToken === token) {
+        watchOwnerToken = null;
+        positionSub?.remove();
+        positionSub = null;
+        headingSub?.remove();
+        headingSub = null;
+        headingSmoother.current.reset();
+        // Clear the published heading so a remount cannot briefly render a
+        // stale direction from the previous session.
+        useSelfPoseStore.getState().reset();
       }
-      headingSub.current?.remove();
-      headingSub.current = null;
       if (broadcastChannel.current) {
         supabase.removeChannel(broadcastChannel.current);
         broadcastChannel.current = null;
