@@ -59,6 +59,22 @@ export async function configureRevenueCat(appUserId: string | null): Promise<voi
     );
     return;
   }
+
+  // A placeholder is worse than nothing: it makes the check above pass, so the
+  // SDK configures with a bogus key and fails somewhere later, at purchase
+  // time, instead of here. The .env in this repo shipped `your-...` as the
+  // Android value and it was very nearly promoted to the build environment.
+  //
+  // RevenueCat public SDK keys are prefixed by store, which makes this cheap to
+  // verify: appl_ for App Store, goog_ for Play, amzn_ for Amazon.
+  if (!/^(appl|goog|amzn)_/.test(apiKey)) {
+    console.warn(
+      `[revenuecat] the ${Platform.OS} SDK key is not a RevenueCat key ` +
+        `(expected an appl_/goog_/amzn_ prefix). Billing is disabled rather ` +
+        `than configured with an invalid key.`,
+    );
+    return;
+  }
   try {
     if (!configured) {
       Purchases.configure({ apiKey, appUserID: appUserId ?? undefined });
