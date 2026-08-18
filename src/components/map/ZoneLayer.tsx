@@ -7,13 +7,14 @@
  * A ZoneLabelMarker at the centroid shows the zone name and handles taps.
  * When movingZoneId matches, the label marker becomes draggable to reposition.
  */
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Circle, Marker, Polygon } from 'react-native-maps';
 import * as Haptics from 'expo-haptics';
 import { useMapStore } from '@/store/useMapStore';
 import { updateSavedPlace } from '@/services/savedPlaces';
-import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
+import { useMarkerSnapshot } from '@/hooks/useMarkerSnapshot';
+import { MAP_Z_MARKER, MAP_Z_SHAPE } from '@/constants/mapLayers';
 import type { SavedPlace } from '@/types/models';
 import type { LatLng } from '@/types/database';
 
@@ -45,13 +46,25 @@ function centroid(coords: LatLng[]): LatLng {
 // ─── ZoneLayer ────────────────────────────────────────────────────────────────
 export const ZoneLayer: React.FC = memo(() => {
   const showZones = useMapStore((s) => s.showZones);
-  const circleIds = useMapStore((s) =>
-    s.savedPlaces.filter((p) => p.shape_type !== 'polygon').map((p) => p.id),
-  );
-  const polygonIds = useMapStore((s) =>
-    s.savedPlaces
-      .filter((p) => p.shape_type === 'polygon' && p.polygon_coords != null && Array.isArray(p.polygon_coords) && p.polygon_coords.length >= 3)
-      .map((p) => p.id),
+  // Subscribe to the source array, not a derived one. The previous selectors
+  // allocated a fresh array on every call and Zustand compares with Object.is,
+  // so this layer re-rendered on EVERY map-store write — including each compass
+  // tick, which is why turning the phone disturbed zones.
+  const savedPlaces = useMapStore((s) => s.savedPlaces);
+
+  const { circleIds, polygonIds } = useMemo(
+    () => ({
+      circleIds: savedPlaces.filter((p) => p.shape_type !== 'polygon').map((p) => p.id),
+      polygonIds: savedPlaces
+        .filter(
+          (p) =>
+            p.shape_type === 'polygon' &&
+            Array.isArray(p.polygon_coords) &&
+            p.polygon_coords.length >= 3,
+        )
+        .map((p) => p.id),
+    }),
+    [savedPlaces],
   );
 
   if (!showZones) return null;
@@ -84,7 +97,7 @@ const ZoneCircleItem: React.FC<{ zoneId: string }> = memo(({ zoneId }) => {
         strokeColor={stroke}
         strokeWidth={strokeWidth}
         fillColor={fill}
-        zIndex={10}
+        zIndex={MAP_Z_SHAPE.ZONE}
       />
       <ZoneLabelMarker zone={zone} coordinate={center} isSelected={isSelected} isMoving={isMoving} />
     </>
@@ -110,7 +123,7 @@ const ZonePolygonItem: React.FC<{ zoneId: string }> = memo(({ zoneId }) => {
         strokeWidth={strokeWidth}
         fillColor={fill}
         tappable
-        zIndex={10}
+        zIndex={MAP_Z_SHAPE.ZONE}
         onPress={() => {
           if (!isMoving) useMapStore.getState().setSelectedSavedPlaceId(zoneId);
         }}
@@ -136,7 +149,14 @@ const ZoneLabelMarker: React.FC<ZoneLabelProps> = memo(
     // in addition to the "Move Zone" menu action (isMoving).
     const [dragging, setDragging] = useState(false);
     const active = dragging || isMoving;
-    const tracksViewChanges = useTracksViewChanges([isSelected, zone.name], active);
+    // Labels stay permanently mounted rather than being shown only when
+    // selected, because <Circle> exposes no tap handler in react-native-maps —
+    // this marker is the ONLY way to open a circle zone's drawer. Stability
+    // comes from layout-gated rasterisation instead of hiding them.
+    const { tracksViewChanges, onLayout } = useMarkerSnapshot(
+      [isSelected, active, zone.name, zone.type],
+      active,
+    );
 
     const handleDragStart = useCallback(() => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -176,10 +196,15 @@ const ZoneLabelMarker: React.FC<ZoneLabelProps> = memo(
         // An always-draggable marker eats the tap on iOS, so the zone could not
         // be opened. Gating drag behind move-mode restores tap-to-open.
         draggable={isMoving}
-        stopPropagation
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
-        zIndex={active ? 999 : isSelected ? 12 : 11}
+        zIndex={
+          active
+            ? MAP_Z_MARKER.DRAGGING
+            : isSelected
+              ? MAP_Z_MARKER.ZONE_LABEL_SELECTED
+              : MAP_Z_MARKER.ZONE_LABEL
+        }
         // onPress (Android) + onSelect (iOS) for reliable taps on custom markers.
         onPress={() => {
           if (!active) useMapStore.getState().setSelectedSavedPlaceId(zone.id);
@@ -188,7 +213,7 @@ const ZoneLabelMarker: React.FC<ZoneLabelProps> = memo(
           if (!active) useMapStore.getState().setSelectedSavedPlaceId(zone.id);
         }}
       >
-        <View style={[
+        <View onLayout={onLayout} style={[
           styles.badge,
           active && styles.badgeActive,
           { borderColor: base + (isSelected || active ? 'cc' : '55') },

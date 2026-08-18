@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { isValidLatitude, isValidLongitude, rejectRow, toArray, toFiniteNumber } from './normalize';
 import type { SavedPlace, SavedPlacePresence, SavedPlacePhoto } from '@/types/models';
 import type { DbSavedPlaceInsert, DbSavedPlaceUpdate } from '@/types/database';
 
@@ -9,18 +10,35 @@ import type { DbSavedPlaceInsert, DbSavedPlaceUpdate } from '@/types/database';
  * string), which made Number.isFinite() drop the zone → it vanished after place.
  * Normalizing on every ingest path fixes that for good.
  */
-export function normalizeSavedPlace(row: any): SavedPlace {
-  let poly = row?.polygon_coords;
-  if (typeof poly === 'string') {
-    try { poly = JSON.parse(poly); } catch { poly = []; }
+/**
+ * Validate + coerce a saved_places row from either PostgREST or realtime.
+ * Returns null (reported in dev) when the zone could not be rendered — these
+ * used to be dropped silently at render time by ZoneLayer's finite checks.
+ */
+export function normalizeSavedPlace(row: any): SavedPlace | null {
+  if (!row?.id) return rejectRow('saved_place', 'missing id', row);
+
+  const latitude = toFiniteNumber(row.latitude);
+  const longitude = toFiniteNumber(row.longitude);
+  if (!isValidLatitude(latitude)) return rejectRow('saved_place', `invalid latitude ${row.latitude}`, row);
+  if (!isValidLongitude(longitude)) return rejectRow('saved_place', `invalid longitude ${row.longitude}`, row);
+
+  // jsonb can arrive from realtime as a JSON string.
+  const polygon = toArray<{ latitude: unknown; longitude: unknown }>(row.polygon_coords)
+    .map((pt) => ({ latitude: toFiniteNumber(pt?.latitude), longitude: toFiniteNumber(pt?.longitude) }))
+    .filter((pt): pt is { latitude: number; longitude: number } =>
+      isValidLatitude(pt.latitude) && isValidLongitude(pt.longitude));
+
+  if (row.shape_type === 'polygon' && polygon.length < 3) {
+    return rejectRow('saved_place', `polygon has ${polygon.length} valid vertices, needs 3`, row);
   }
-  if (!Array.isArray(poly)) poly = [];
+
   return {
     ...row,
-    latitude: Number(row?.latitude),
-    longitude: Number(row?.longitude),
-    radius_meters: Number(row?.radius_meters) || 100,
-    polygon_coords: poly,
+    latitude,
+    longitude,
+    radius_meters: toFiniteNumber(row.radius_meters) ?? 100,
+    polygon_coords: polygon,
   } as SavedPlace;
 }
 
@@ -31,7 +49,7 @@ export async function fetchGroupSavedPlaces(groupId: string): Promise<SavedPlace
     .eq('group_id', groupId)
     .order('created_at', { ascending: false });
   if (error || !data) return [];
-  return data.map(normalizeSavedPlace);
+  return data.map(normalizeSavedPlace).filter((p): p is SavedPlace => p !== null);
 }
 
 export async function createSavedPlace(insert: DbSavedPlaceInsert): Promise<SavedPlace | null> {

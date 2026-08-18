@@ -1,11 +1,24 @@
 /**
  * Manages Supabase realtime subscriptions for the active group.
- * Subscribes once, cleans up properly on group change.
  *
- * On every group switch we:
- *   1. Clear the previous crew's live positions / markers / zones (isolation).
- *   2. Load this group's markers, zones, members and current live positions.
- *   3. Subscribe to granular realtime changes for all of the above.
+ * ── Population lifecycle (the "everything vanished" bug) ─────────────────────
+ * This effect used to open with:
+ *     useMapStore.setState({ crewLocations: {}, markers: [], savedPlaces: [] });
+ * and then fire async reloads. Every marker and zone unmounted — native views
+ * destroyed — and remounted a network round-trip later, so ANY re-run of this
+ * effect blanked the map, including an ordinary same-crew resubscribe.
+ *
+ * The replacement distinguishes the two cases, because they have opposite
+ * requirements:
+ *   • crew A → crew B — clear immediately. Crew isolation is a correctness
+ *     boundary; showing A's pins while B loads would render one crew's
+ *     positions under another crew's context. Isolation beats continuity.
+ *   • crew A → crew A — do not touch the screen. Fetch in the background and
+ *     install atomically via commitPopulation.
+ *
+ * commitPopulation additionally rejects late responses whose groupId no longer
+ * matches the active crew, so a slow fetch for A cannot land after a switch
+ * to B.
  */
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/services/supabase';
@@ -15,7 +28,9 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { getCrewColor } from '@/constants/map';
 import { getLocationStatus } from '@/utils/time';
 import { fetchGroupLiveLocations } from '@/services/liveLocations';
-import { normalizeSavedPlace } from '@/services/savedPlaces';
+import { fetchGroupMarkers, isMarkerVisibleToGroup, normalizeMarker } from '@/services/markers';
+import { fetchGroupSavedPlaces, normalizeSavedPlace } from '@/services/savedPlaces';
+import { isValidLatitude, isValidLongitude, rejectRow, toFiniteNumber } from '@/services/normalize';
 import { sendLocalNotification } from '@/services/notifications';
 import { useCrewPrefsStore } from '@/store/useCrewPrefsStore';
 import { useNotifCenterStore } from '@/store/useNotifCenterStore';
@@ -30,15 +45,18 @@ function isUuid(v: string | null | undefined): v is string {
   return !!v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 }
 
-/** Map a live_locations DB row → MapCrewMember. Honors explicit offline/paused. */
-function mapLiveRow(row: any): MapCrewMember | null {
-  if (!row?.user_id) return null;
-  const lat = row.is_approximate ? row.approximate_latitude : row.latitude;
-  const lng = row.is_approximate ? row.approximate_longitude : row.longitude;
-  if (lat == null || lng == null) return null;
+/**
+ * Map a live_locations DB row → MapCrewMember, validating at ingress.
+ * Honors explicit offline/paused rather than waiting for last_ping_at to age.
+ */
+export function mapLiveRow(row: any): MapCrewMember | null {
+  if (!row?.user_id) return rejectRow('live_location', 'missing user_id', row);
 
-  // A member who has gone dark is marked offline/paused in the DB — respect that
-  // immediately rather than waiting for last_ping_at to age out.
+  const lat = toFiniteNumber(row.is_approximate ? row.approximate_latitude : row.latitude);
+  const lng = toFiniteNumber(row.is_approximate ? row.approximate_longitude : row.longitude);
+  if (!isValidLatitude(lat)) return rejectRow('live_location', `invalid latitude ${lat}`, row);
+  if (!isValidLongitude(lng)) return rejectRow('live_location', `invalid longitude ${lng}`, row);
+
   const explicit = row.status === 'offline' || row.status === 'paused';
   const status = explicit ? row.status : getLocationStatus(row.last_ping_at);
 
@@ -47,10 +65,12 @@ function mapLiveRow(row: any): MapCrewMember | null {
     group_id: row.group_id,
     latitude: lat,
     longitude: lng,
-    heading: row.heading ?? 0,
-    speed: row.speed ?? 0,
-    accuracy: row.accuracy ?? 0,
-    battery_level: row.battery_level ?? null,
+    // Preserved as null when the sender had no compass fix — CrewMarker hides
+    // the direction cone rather than pointing it north.
+    heading: toFiniteNumber(row.heading),
+    speed: toFiniteNumber(row.speed) ?? 0,
+    accuracy: toFiniteNumber(row.accuracy) ?? 0,
+    battery_level: toFiniteNumber(row.battery_level),
     status: status as any,
     sharing_mode: row.sharing_mode,
     updated_at: row.updated_at,
@@ -65,33 +85,49 @@ function mapLiveRow(row: any): MapCrewMember | null {
 
 export function useRealtimeGroup() {
   const activeGroupId = useGroupStore((s) => s.activeGroupId);
-  const session = useAuthStore((s) => s.session);
-  const { setCrewLocation, loadMarkers, loadSavedPlaces } = useMapStore();
+  // Primitive selector. The old `const { setCrewLocation, loadMarkers,
+  // loadSavedPlaces } = useMapStore()` was a whole-store subscription, so the
+  // host screen re-rendered on every single map-store write.
+  const myUserId = useAuthStore((s) => s.session?.user?.id);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const loadGeneration = useRef(0);
 
   useEffect(() => {
     if (!isUuid(activeGroupId)) return;
 
     const gid = activeGroupId!;
-    const myId = session?.user?.id;
+    const myId = myUserId;
+    const generation = ++loadGeneration.current;
     const channelName = `group_${gid}_${Date.now()}`;
 
-    // 1. Clear the previous crew's data so nothing bleeds across crews.
-    useMapStore.setState({ crewLocations: {}, markers: [], savedPlaces: [] });
+    // 1. Clear ONLY on a genuine crew change (see header note).
+    if (useMapStore.getState().populationGroupId !== gid) {
+      useMapStore.getState().suspendPopulation();
+    }
 
-    // 2. Initial loads for this group.
-    loadMarkers(gid);
-    loadSavedPlaces(gid);
+    // 2. Load the whole population, then install it in one atomic write so the
+    //    user never sees a partially-filled or empty map for the active crew.
+    (async () => {
+      const [markers, savedPlaces, liveRows] = await Promise.all([
+        fetchGroupMarkers(gid).catch(() => []),
+        fetchGroupSavedPlaces(gid).catch(() => []),
+        fetchGroupLiveLocations(gid).catch(() => []),
+      ]);
+
+      // Superseded by a newer crew switch — discard rather than render.
+      if (loadGeneration.current !== generation) return;
+
+      const crewLocations: Record<string, MapCrewMember> = {};
+      for (const row of liveRows) {
+        if (row.user_id === myId) continue; // self is owned by useLocationTracker
+        const member = mapLiveRow(row);
+        if (member) crewLocations[member.user_id] = member;
+      }
+
+      useMapStore.getState().commitPopulation(gid, { markers, savedPlaces, crewLocations });
+    })();
+
     useGroupStore.getState().loadGroupMembers(gid);
-    fetchGroupLiveLocations(gid)
-      .then((rows) => {
-        rows.forEach((row) => {
-          if (row.user_id === myId) return; // self handled by useLocationTracker
-          const member = mapLiveRow(row);
-          if (member) useMapStore.getState().setCrewLocation(member.user_id, member);
-        });
-      })
-      .catch(() => {});
 
     // 3. Realtime subscriptions.
     const channel = supabase
@@ -103,7 +139,7 @@ export function useRealtimeGroup() {
           const row = payload.new as any;
           if (!row?.user_id || row.user_id === myId) return;
           const member = mapLiveRow(row);
-          if (member) setCrewLocation(row.user_id, member);
+          if (member) useMapStore.getState().setCrewLocation(row.user_id, member);
         },
       )
       .on(
@@ -114,10 +150,18 @@ export function useRealtimeGroup() {
           if (payload.eventType === 'DELETE') {
             const id = (payload.old as any)?.id;
             if (id) store.removeMarkerFromStore(id);
-          } else {
-            const r = payload.new as any;
-            if (r?.id) store.upsertMarkerInStore(r);
+            return;
           }
+          const raw = payload.new as any;
+          // Realtime rows previously bypassed both normalization and the
+          // `visible_to_group` filter that the initial fetch applies, so a
+          // hidden marker appeared live and then vanished on the next reload.
+          if (!isMarkerVisibleToGroup(raw)) {
+            if (raw?.id) store.removeMarkerFromStore(raw.id);
+            return;
+          }
+          const marker = normalizeMarker(raw);
+          if (marker) store.upsertMarkerInStore(marker);
         },
       )
       .on(
@@ -128,11 +172,14 @@ export function useRealtimeGroup() {
           if (payload.eventType === 'DELETE') {
             const id = (payload.old as any)?.id;
             if (id) store.removeSavedPlaceFromStore(id);
-          } else {
-            const r = payload.new as any;
-            // Normalize: realtime can deliver lat/lng as strings + polygon_coords
-            // as a JSON string, which would make ZoneLayer drop the zone.
-            if (r?.id) store.upsertSavedPlaceInStore(normalizeSavedPlace(r));
+            return;
+          }
+          const r = payload.new as any;
+          // Realtime can deliver lat/lng as strings and polygon_coords as a JSON
+          // string, which would make ZoneLayer silently drop the zone.
+          if (r?.id) {
+            const place = normalizeSavedPlace(r);
+            if (place) store.upsertSavedPlaceInStore(place);
           }
         },
       )
@@ -141,7 +188,7 @@ export function useRealtimeGroup() {
         { event: '*', schema: 'public', table: 'group_members', filter: `group_id=eq.${gid}` },
         () => {
           // Someone joined/left/changed role — refresh the roster so new crew
-          // members appear (and their markers resolve names) without a manual reload.
+          // members appear (and their markers resolve names) without a reload.
           useGroupStore.getState().loadGroupMembers(gid);
         },
       )
@@ -172,5 +219,5 @@ export function useRealtimeGroup() {
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [activeGroupId, session?.user?.id]);
+  }, [activeGroupId, myUserId]);
 }

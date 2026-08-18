@@ -34,6 +34,14 @@ interface MapState {
   // Crew locations (keyed by userId)
   crewLocations: Record<string, MapCrewMember>;
 
+  /**
+   * Which crew the currently-rendered markers/zones/crewLocations belong to.
+   * null means "no trusted population" (mid crew-switch). This is the crew
+   * isolation boundary: nothing may render unless it was committed for the
+   * crew that is active right now.
+   */
+  populationGroupId: string | null;
+
   // My location
   myLocation: { latitude: number; longitude: number; heading: number; accuracy: number; speed?: number } | null;
 
@@ -117,6 +125,17 @@ interface MapState {
   setCrewLocation: (userId: string, loc: MapCrewMember) => void;
   removeCrewLocation: (userId: string) => void;
 
+  // Crew population lifecycle (see Stage 12 notes in useRealtimeGroup)
+  suspendPopulation: () => void;
+  commitPopulation: (
+    groupId: string,
+    data: {
+      markers: Marker[];
+      savedPlaces: SavedPlace[];
+      crewLocations: Record<string, MapCrewMember>;
+    },
+  ) => void;
+
   // My location
   setMyLocation: (loc: { latitude: number; longitude: number; heading: number; accuracy: number; speed?: number }) => void;
   goTo: (coords: LatLng) => void;
@@ -194,6 +213,7 @@ export const useMapStore = create<MapState>()(
       goToTarget: null,
       goToTrigger: 0,
       crewLocations: {},
+      populationGroupId: null,
       myLocation: null,
       selectedMapUser: null,
       selectedMarkerId: null,
@@ -312,6 +332,34 @@ export const useMapStore = create<MapState>()(
           delete copy[userId];
           return { crewLocations: copy };
         }),
+
+      /**
+       * Crew switch — drop the outgoing crew's data immediately.
+       *
+       * Isolation beats visual continuity: holding crew A's pins on screen
+       * while crew B loads would briefly render one crew's positions under
+       * another crew's context. This is the ONLY path that clears, and it runs
+       * only when the crew actually changes.
+       */
+      suspendPopulation: () =>
+        set({ crewLocations: {}, markers: [], savedPlaces: [], populationGroupId: null }),
+
+      /**
+       * Atomically install a fully-loaded population.
+       *
+       * Rejects late responses: if the user switched crews while this fetch was
+       * in flight, `groupId` no longer matches the active crew and the data is
+       * discarded rather than rendered under the wrong crew.
+       */
+      commitPopulation: (groupId, data) => {
+        if (useGroupStore.getState().activeGroupId !== groupId) return;
+        set({
+          markers: data.markers,
+          savedPlaces: data.savedPlaces,
+          crewLocations: data.crewLocations,
+          populationGroupId: groupId,
+        });
+      },
 
       setMyLocation: (loc) => set({ myLocation: loc }),
       goTo: (coords) => set((s) => ({ goToTarget: coords, goToTrigger: s.goToTrigger + 1 })),

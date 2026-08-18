@@ -1,9 +1,10 @@
 /**
  * MarkerLayer — renders shared tactical markers.
- * Memoized per marker ID + selection state. Never rerenders on GPS ticks.
- * Supports drag-to-move when draggingMarkerId matches.
+ *
+ * Each pin subscribes to its own record by ID, so adding, updating or deleting
+ * one marker cannot re-render or remount its neighbours.
  */
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 import { Marker } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,20 +12,34 @@ import * as Haptics from 'expo-haptics';
 import { useMapStore } from '@/store/useMapStore';
 import { updateMarker } from '@/services/markers';
 import { getMarkerConfig } from '@/constants/markerTypes';
-import { useTracksViewChanges } from '@/hooks/useTracksViewChanges';
+import { useMarkerSnapshot } from '@/hooks/useMarkerSnapshot';
+import { MAP_Z_MARKER } from '@/constants/mapLayers';
 
 export const MarkerLayer: React.FC = memo(() => {
-  const markerIds = useMapStore((s) =>
-    s.markers.filter((m) => !s.hiddenMarkerTypes.includes(m.type)).map((m) => m.id),
+  // Subscribe to the SOURCE arrays, not a derived one. The previous selector
+  //   s.markers.filter(...).map(m => m.id)
+  // allocated a fresh array on every call, and Zustand compares with Object.is,
+  // so this layer re-rendered on EVERY map-store write — including each compass
+  // tick. Both selectors below return stable references until the data changes,
+  // and the derivation happens in useMemo.
+  const markers = useMapStore((s) => s.markers);
+  const hiddenMarkerTypes = useMapStore((s) => s.hiddenMarkerTypes);
+
+  const visibleIds = useMemo(
+    () => markers.filter((m) => !hiddenMarkerTypes.includes(m.type)).map((m) => m.id),
+    [markers, hiddenMarkerTypes],
   );
+
   return (
     <>
-      {markerIds.map((id) => (
+      {visibleIds.map((id) => (
         <TacticalMarkerPin key={id} markerId={id} />
       ))}
     </>
   );
 });
+
+MarkerLayer.displayName = 'MarkerLayer';
 
 const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) => {
   const marker = useMapStore((s) => s.markers.find((m) => m.id === markerId));
@@ -35,21 +50,34 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
   const [dragging, setDragging] = useState(false);
   const isDragging = dragging || menuMove;
 
-  // Keep the snapshot fresh while selected/dragging or just after mount, then
-  // settle to a static (cheap) marker. Fixes blank / un-tappable pins.
-  const tracksViewChanges = useTracksViewChanges([isSelected], isDragging);
-
-  // Drop-bounce animation on mount
+  // Drop-bounce animation on mount.
   const dropAnim = useRef(new Animated.Value(0)).current;
+  const [dropSettled, setDropSettled] = useState(false);
   useEffect(() => {
-    Animated.spring(dropAnim, {
+    const animation = Animated.spring(dropAnim, {
       toValue: 1,
       tension: 80,
       friction: 6,
       useNativeDriver: true,
-    }).start();
-  }, []);
+    });
+    animation.start(() => setDropSettled(true));
+    return () => animation.stop();
+  }, [dropAnim]);
   const scaleY = dropAnim.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0.3, 1.12, 1] });
+
+  const config = marker ? getMarkerConfig(marker.type) : null;
+
+  // Rasterise until the view has actually been measured — never on a timer.
+  //
+  // `force` covers the two cases where onLayout alone is not enough:
+  //  • the drop-bounce is a TRANSFORM, which does not trigger re-layout, so
+  //    settling on first onLayout would freeze the pin squashed at scaleY 0.3.
+  //    We hold until the spring's completion callback fires.
+  //  • while dragging, the pin's appearance changes every frame.
+  const { tracksViewChanges, onLayout } = useMarkerSnapshot(
+    [isSelected, marker?.title ?? '', marker?.type ?? ''],
+    !dropSettled || isDragging,
+  );
 
   const handleDragStart = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -68,38 +96,40 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
     [markerId],
   );
 
-  if (!marker) return null;
+  const handlePress = useCallback(() => {
+    if (!isDragging) useMapStore.getState().setSelectedFieldMarkerId(markerId);
+  }, [isDragging, markerId]);
+
+  if (!marker || !config) return null;
   const { latitude, longitude } = marker;
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-
-  const config = getMarkerConfig(marker.type);
 
   return (
     <Marker
       coordinate={{ latitude, longitude }}
+      // Now honoured on iOS too (Apple Maps ignored `anchor`), so the pin tip
+      // genuinely sits on the coordinate rather than the pin being centred.
       anchor={{ x: 0.5, y: 1 }}
       tracksViewChanges={tracksViewChanges}
-      // Only draggable once the user chooses "Move" from the detail sheet.
-      // An always-draggable marker swallows the tap gesture on iOS, so onPress
-      // never fires and the detail sheet can't open. Gating drag behind move-mode
-      // makes a normal tap reliably open the sheet.
+      // Only draggable once the user chooses "Move" from the detail sheet — an
+      // always-draggable marker swallows the tap gesture, so onPress never fires
+      // and the detail sheet cannot open.
       draggable={menuMove}
-      // iOS (Apple Maps): stop the marker tap from bubbling to the MapView's
-      // onPress — that bubbling was clearing the selection (sheet flashed shut).
-      stopPropagation
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      // Two native tap events for reliability: onPress (Android) + onSelect (iOS).
-      // Both set the same id, so firing both is harmless.
-      onPress={() => {
-        if (!isDragging) useMapStore.getState().setSelectedFieldMarkerId(markerId);
-      }}
-      onSelect={() => {
-        if (!isDragging) useMapStore.getState().setSelectedFieldMarkerId(markerId);
-      }}
-      zIndex={isDragging ? 999 : isSelected ? 995 : 30}
+      // onPress (Android) + onSelect (iOS) — both are exported by the Google
+      // marker managers and both set the same id, so firing both is harmless.
+      onPress={handlePress}
+      onSelect={handlePress}
+      zIndex={
+        isDragging
+          ? MAP_Z_MARKER.DRAGGING
+          : isSelected
+            ? MAP_Z_MARKER.FIELD_MARKER_SELECTED
+            : MAP_Z_MARKER.FIELD_MARKER
+      }
     >
-      <Animated.View style={[styles.wrapper, { transform: [{ scaleY }] }]}>
+      <Animated.View style={[styles.wrapper, { transform: [{ scaleY }] }]} onLayout={onLayout}>
         {/* Drag hint badge */}
         {isDragging && (
           <View style={styles.dragBadge}>
@@ -107,7 +137,7 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
           </View>
         )}
 
-        {/* Title badge — only when selected (not dragging) */}
+        {/* Title badge — selected only, so a resting pin carries no dynamic text. */}
         {isSelected && !isDragging && (
           <View style={styles.titleBadge}>
             <Text style={styles.titleText} numberOfLines={1}>
@@ -144,6 +174,8 @@ const TacticalMarkerPin: React.FC<{ markerId: string }> = memo(({ markerId }) =>
     </Marker>
   );
 });
+
+TacticalMarkerPin.displayName = 'TacticalMarkerPin';
 
 const styles = StyleSheet.create({
   wrapper: { alignItems: 'center' },
@@ -210,8 +242,6 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 14,
   },
-  emoji: { fontSize: 18 },
-  emojiSelected: { fontSize: 22 },
 
   stem: {
     width: 0,

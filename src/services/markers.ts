@@ -1,6 +1,34 @@
 import { supabase } from './supabase';
 import type { Marker, MarkerPhoto } from '@/types/models';
 import type { DbMarkerInsert, DbMarkerUpdate } from '@/types/database';
+import { isValidLatitude, isValidLongitude, rejectRow, toFiniteNumber } from './normalize';
+
+/**
+ * Single source of truth for whether a marker row may appear on the map.
+ *
+ * The initial fetch filtered `visible_to_group = true` in SQL but the realtime
+ * upsert applied no filter at all, so a hidden marker would pop onto the map
+ * live and then disappear on the next reload. Both paths now call this.
+ */
+export function isMarkerVisibleToGroup(row: any): boolean {
+  return row?.visible_to_group !== false;
+}
+
+/**
+ * Validate + coerce a markers row from either PostgREST or realtime.
+ * Returns null (and reports in dev) when the row cannot be rendered.
+ */
+export function normalizeMarker(row: any): Marker | null {
+  if (!row?.id) return rejectRow('marker', 'missing id', row);
+  if (!row?.group_id) return rejectRow('marker', 'missing group_id', row);
+
+  const latitude = toFiniteNumber(row.latitude);
+  const longitude = toFiniteNumber(row.longitude);
+  if (!isValidLatitude(latitude)) return rejectRow('marker', `invalid latitude ${row.latitude}`, row);
+  if (!isValidLongitude(longitude)) return rejectRow('marker', `invalid longitude ${row.longitude}`, row);
+
+  return { ...row, latitude, longitude } as Marker;
+}
 
 export async function fetchGroupMarkers(groupId: string): Promise<Marker[]> {
   const { data, error } = await supabase
@@ -10,7 +38,7 @@ export async function fetchGroupMarkers(groupId: string): Promise<Marker[]> {
     .eq('visible_to_group', true)
     .order('created_at', { ascending: false });
   if (error || !data) return [];
-  return data as Marker[];
+  return data.map(normalizeMarker).filter((m): m is Marker => m !== null);
 }
 
 export async function createMarker(insert: DbMarkerInsert): Promise<Marker | null> {
@@ -20,7 +48,7 @@ export async function createMarker(insert: DbMarkerInsert): Promise<Marker | nul
     .select()
     .single();
   if (error || !data) return null;
-  return data as Marker;
+  return normalizeMarker(data);
 }
 
 export async function updateMarker(markerId: string, updates: DbMarkerUpdate): Promise<boolean> {

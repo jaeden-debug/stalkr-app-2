@@ -367,7 +367,12 @@ export interface MapCrewMember {
   group_id: string;
   latitude: number;
   longitude: number;
-  heading: number;
+  /**
+   * Device-facing direction in degrees, or null when the member's device has
+   * no compass fix. Null must be preserved rather than coerced to 0 — a cone
+   * pointing north is a claim about where someone is facing.
+   */
+  heading: number | null;
   speed: number;
   accuracy: number;
   battery_level: number | null;
