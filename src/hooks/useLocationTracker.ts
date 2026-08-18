@@ -22,7 +22,12 @@ import { isInsideCircle } from '@/utils/distance';
 import { isInsidePolygon } from '@/utils/polygon';
 import { isQuietHours } from '@/utils/time';
 import { upsertPresence } from '@/services/savedPlaces';
-import { evaluateArrivals, upsertMarkerPresence } from '@/services/markerArrival';
+import {
+  evaluateArrivals,
+  upsertMarkerPresence,
+  arrivalThresholdFor,
+  JOURNEY_ARRIVAL_RADIUS_M,
+} from '@/services/markerArrival';
 import { sendZoneNotification, sendPushNotification } from '@/services/notifications';
 import { logEvent } from '@/services/groupEvents';
 import * as Haptics from 'expo-haptics';
@@ -537,7 +542,17 @@ export function useLocationTracker() {
                 journeySession.destination_latitude,
                 journeySession.destination_longitude,
               );
-              if (dist <= 100) {
+              // Same accuracy discipline as marker arrival. A bare `dist <= 100`
+              // fires "arrived safely" off a ±500m fix — telling the people
+              // watching that someone got there when they may be nowhere near.
+              // Of everything this app sends, that is the message least
+              // acceptable to get wrong, so an unusable fix decides nothing and
+              // we simply wait for a better one.
+              const arriveWithin = arrivalThresholdFor(
+                JOURNEY_ARRIVAL_RADIUS_M,
+                accuracy ?? Number.NaN,
+              );
+              if (arriveWithin !== null && dist <= arriveWithin) {
                 arrivedSessions.current.add(journeySession.id);
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 // Mark arrived in DB + store

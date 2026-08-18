@@ -36,10 +36,34 @@ export const MAX_ARRIVAL_RADIUS_M = 500;
 const EXIT_HYSTERESIS = 1.35;
 
 /**
- * A fix worse than this cannot resolve a small radius at all. Accepting it
- * would fire "arrived at camp" while the user is still a field away.
+ * A fix is unusable once its uncertainty outgrows the ring it is being tested
+ * against, so the cap is proportional rather than absolute. At the 50m default
+ * marker radius this yields 60m, which is where it was pinned before; a 100m
+ * journey destination correctly tolerates a coarser fix than a 15m pin does.
+ *
+ * Accepting a fix past this would fire "arrived" while the user is still a
+ * field away — and for a journey that message is "arrived safely", sent to the
+ * people watching precisely because they are worried.
  */
-const MAX_USABLE_ACCURACY_M = 60;
+const MAX_USABLE_ACCURACY_RATIO = 1.2;
+
+/** Journey destinations use a wider ring than markers. */
+export const JOURNEY_ARRIVAL_RADIUS_M = 100;
+
+/**
+ * How close a fix must be to count as arrival, given its own uncertainty.
+ * Returns null when the fix is too imprecise to decide at all — the caller
+ * must then do nothing rather than guess.
+ *
+ * Shared by marker arrival and journey arrival so both obey the same rule: a
+ * ±40m fix does not claim arrival at a 50m ring from 85m away. The floor keeps
+ * arrival reachable, so a poor-but-usable fix cannot make it impossible.
+ */
+export function arrivalThresholdFor(radius: number, accuracy: number): number | null {
+  if (!Number.isFinite(radius) || radius <= 0) return null;
+  if (!Number.isFinite(accuracy) || accuracy > radius * MAX_USABLE_ACCURACY_RATIO) return null;
+  return Math.max(MIN_ARRIVAL_RADIUS_M / 2, radius - accuracy);
+}
 
 export interface ArrivalEvaluation {
   markerId: string;
@@ -68,10 +92,6 @@ export function evaluateArrivals(
   fix: ArrivalInput,
   wasInside: Record<string, boolean>,
 ): ArrivalEvaluation[] {
-  // A fix too imprecise to place the user within a 50m circle must not drive
-  // arrival at all — better silent than wrong.
-  if (!Number.isFinite(fix.accuracy) || fix.accuracy > MAX_USABLE_ACCURACY_M) return [];
-
   const out: ArrivalEvaluation[] = [];
 
   for (const marker of markers) {
@@ -86,10 +106,11 @@ export function evaluateArrivals(
 
     const previously = wasInside[marker.id] ?? false;
 
-    // Shrink the arrival ring by the fix's own uncertainty, so a ±40m fix does
-    // not claim arrival at a 50m marker from 85m away. Never below a floor —
-    // otherwise a poor fix makes arrival unreachable.
-    const arriveWithin = Math.max(MIN_ARRIVAL_RADIUS_M / 2, radius - fix.accuracy);
+    // A fix too imprecise for this ring decides NOTHING — neither arrival nor
+    // departure. Letting a coarse fix report departure would tell the crew you
+    // left while you are standing at the marker.
+    const arriveWithin = arrivalThresholdFor(radius, fix.accuracy);
+    if (arriveWithin === null) continue;
     const departBeyond = radius * EXIT_HYSTERESIS;
 
     if (!previously && distance <= arriveWithin) {
