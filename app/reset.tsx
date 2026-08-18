@@ -11,6 +11,7 @@ import { supabase } from '@/services/supabase';
 import { updatePassword } from '@/services/auth';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
+import { C } from '@/constants/theme';
 
 function parseAuthParams(url: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -80,7 +81,7 @@ export default function ResetScreen() {
         </View>
 
         {!ready && !checked && (
-          <View style={s.center}><ActivityIndicator color="#22c55e" /><Text style={s.sub}>Opening your reset link…</Text></View>
+          <View style={s.center}><ActivityIndicator color={C.green} /><Text style={s.sub}>Opening your reset link…</Text></View>
         )}
 
         {!ready && checked && (
@@ -93,8 +94,8 @@ export default function ResetScreen() {
         {ready && (
           <View style={s.form}>
             <Text style={s.sub}>Choose a new password for your account.</Text>
-            <TextInput style={s.input} placeholder="New password" placeholderTextColor="rgba(255,255,255,0.35)" secureTextEntry value={password} onChangeText={setPassword} selectionColor="#22c55e" />
-            <TextInput style={s.input} placeholder="Confirm new password" placeholderTextColor="rgba(255,255,255,0.35)" secureTextEntry value={confirm} onChangeText={setConfirm} returnKeyType="done" onSubmitEditing={handleSave} selectionColor="#22c55e" />
+            <TextInput style={s.input} placeholder="New password" placeholderTextColor={C.textMuted} secureTextEntry value={password} onChangeText={setPassword} selectionColor={C.green} />
+            <TextInput style={s.input} placeholder="Confirm new password" placeholderTextColor={C.textMuted} secureTextEntry value={confirm} onChangeText={setConfirm} returnKeyType="done" onSubmitEditing={handleSave} selectionColor={C.green} />
             <Button label="Update password" onPress={handleSave} loading={saving} fullWidth size="lg" />
           </View>
         )}
@@ -104,16 +105,16 @@ export default function ResetScreen() {
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0f' },
+  root: { flex: 1, backgroundColor: C.bg },
   container: { flex: 1, padding: 24, justifyContent: 'center', gap: 28 },
   brand: { alignItems: 'center', gap: 10 },
   logo: { width: 84, height: 84 },
-  title: { color: '#f8fafc', fontSize: 26, fontWeight: '900', letterSpacing: 2 },
+  title: { color: C.textPrimary, fontSize: 26, fontWeight: '900', letterSpacing: 2 },
   center: { alignItems: 'center', gap: 16 },
   form: { gap: 14 },
   sub: { color: 'rgba(255,255,255,0.55)', fontSize: 14, textAlign: 'center', lineHeight: 21 },
   input: {
     backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 14, padding: 14, color: '#f8fafc', fontSize: 16, height: 52,
+    borderRadius: 14, padding: 14, color: C.textPrimary, fontSize: 16, height: 52,
   },
 });

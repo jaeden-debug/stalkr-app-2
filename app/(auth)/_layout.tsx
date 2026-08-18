@@ -1,5 +1,6 @@
 import { Stack, Redirect } from 'expo-router';
 import { useAuthStore } from '@/store/useAuthStore';
+import { C } from '@/constants/theme';
 
 export default function AuthLayout() {
   const user = useAuthStore((s) => s.user);
@@ -8,7 +9,7 @@ export default function AuthLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: '#0a0a0f' },
+        contentStyle: { backgroundColor: C.bg },
         animation: 'slide_from_right',
       }}
     />

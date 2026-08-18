@@ -1,21 +1,12 @@
 import React, { useState } from 'react';
-import {
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
-import { APP_CONFIG } from '@/config/app';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import { AuthScaffold, AuthField, authInputStyle } from '@/components/auth/AuthScaffold';
+import { C } from '@/constants/theme';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -27,7 +18,7 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
-      toast.error('Please enter email and password');
+      toast.error('Enter your email and password');
       return;
     }
     const success = await signIn(email.trim(), password);
@@ -35,116 +26,72 @@ export default function LoginScreen() {
       track({ name: 'signed_in' });
       router.replace('/(tabs)/map');
     } else {
-      toast.error(error || 'Login failed. Check your credentials.');
+      toast.error(error || 'Sign in failed. Check your credentials.');
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Logo / branding */}
-        <View style={styles.brand}>
-          <Image source={require('../../assets/stalkr-logo.png')} style={styles.logo} resizeMode="contain" />
-          <Text style={styles.brandName}>{APP_CONFIG.name}</Text>
-          <Text style={styles.brandTagline}>Real-time location awareness & safety</Text>
-        </View>
-
-        {/* Form */}
-        <View style={styles.form}>
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="your@email.com"
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              returnKeyType="next"
-              selectionColor="#22c55e"
-            />
-          </View>
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="••••••••"
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              returnKeyType="done"
-              onSubmitEditing={handleLogin}
-              selectionColor="#22c55e"
-            />
-          </View>
-          <TouchableOpacity onPress={() => router.push('/(auth)/forgot-password')} style={styles.forgot}>
-            <Text style={styles.forgotText}>Forgot password?</Text>
-          </TouchableOpacity>
-          <Button
-            label="Sign In"
-            onPress={handleLogin}
-            loading={loading}
-            fullWidth
-            size="lg"
-          />
-        </View>
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Don't have an account? </Text>
+    <AuthScaffold
+      eyebrow="SIGN IN"
+      title="Welcome back"
+      subtitle="Sign in to see where your crew is."
+      footer={
+        <>
+          <Text style={s.footerText}>No account yet? </Text>
           <Link href="/(auth)/register" asChild>
             <TouchableOpacity>
-              <Text style={styles.footerLink}>Sign Up</Text>
+              <Text style={s.footerLink}>Create one</Text>
             </TouchableOpacity>
           </Link>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </>
+      }
+    >
+      <AuthField label="Email">
+        <TextInput
+          style={authInputStyle}
+          placeholder="you@example.com"
+          placeholderTextColor={C.textMuted}
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoComplete="email"
+          returnKeyType="next"
+          selectionColor={C.green}
+        />
+      </AuthField>
+
+      <AuthField label="Password">
+        <TextInput
+          style={authInputStyle}
+          placeholder="••••••••"
+          placeholderTextColor={C.textMuted}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          autoComplete="current-password"
+          returnKeyType="done"
+          onSubmitEditing={handleLogin}
+          selectionColor={C.green}
+        />
+      </AuthField>
+
+      <TouchableOpacity
+        onPress={() => router.push('/(auth)/forgot-password')}
+        style={s.forgot}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Text style={s.forgotText}>Forgot password?</Text>
+      </TouchableOpacity>
+
+      <Button label="Sign In" onPress={handleLogin} loading={loading} fullWidth size="lg" />
+    </AuthScaffold>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0f' },
-  container: {
-    flexGrow: 1,
-    padding: 24,
-    justifyContent: 'center',
-    gap: 32,
-  },
-  brand: { alignItems: 'center', gap: 10 },
-  logo: { width: 96, height: 96 },
-  forgot: { alignSelf: 'flex-end', paddingVertical: 4 },
-  forgotText: { color: '#22c55e', fontSize: 13, fontWeight: '600' },
-  brandName: {
-    color: '#f8fafc',
-    fontSize: 34,
-    fontWeight: '900',
-    letterSpacing: 4,
-  },
-  brandTagline: { color: 'rgba(255,255,255,0.5)', fontSize: 13 },
-  form: { gap: 16 },
-  fieldGroup: { gap: 6 },
-  label: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
-  input: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 14,
-    padding: 14,
-    color: '#f8fafc',
-    fontSize: 16,
-    height: 52,
-  },
-  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  footerText: { color: '#8888aa', fontSize: 14 },
-  footerLink: { color: '#22c55e', fontSize: 14, fontWeight: '700' },
+const s = StyleSheet.create({
+  forgot: { alignSelf: 'flex-end', marginTop: -4 },
+  forgotText: { color: C.green, fontSize: 12.5, fontWeight: '700' },
+  footerText: { color: C.textSub, fontSize: 13.5 },
+  footerLink: { color: C.green, fontSize: 13.5, fontWeight: '800' },
 });

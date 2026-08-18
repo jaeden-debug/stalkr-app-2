@@ -7,6 +7,7 @@ import {
   TouchableOpacityProps,
   View,
 } from 'react-native';
+import { C } from '@/constants/theme';
 
 type Variant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'outline' | 'sos';
 type Size = 'sm' | 'md' | 'lg' | 'xl';
@@ -22,12 +23,14 @@ interface ButtonProps extends Omit<TouchableOpacityProps, 'style'> {
 }
 
 const VARIANT_STYLES: Record<Variant, { bg: string; text: string; border?: string }> = {
-  primary:   { bg: '#22c55e', text: '#000000' },
-  secondary: { bg: '#1a1a24', text: '#e8e8f0', border: '#2a2a3a' },
-  danger:    { bg: '#ef4444', text: '#ffffff' },
-  ghost:     { bg: 'transparent', text: '#e8e8f0' },
-  outline:   { bg: 'transparent', text: '#22c55e', border: '#22c55e' },
-  sos:       { bg: '#ef4444', text: '#ffffff' },
+  // Sourced from the design system rather than hardcoded, so buttons match the
+  // nav drawer instead of drifting to a slightly different green/grey.
+  primary:   { bg: C.green, text: '#04140A' },
+  secondary: { bg: C.surface, text: C.textPrimary, border: C.border },
+  danger:    { bg: C.red, text: '#FFFFFF' },
+  ghost:     { bg: 'transparent', text: C.textPrimary },
+  outline:   { bg: 'transparent', text: C.green, border: C.greenBorder },
+  sos:       { bg: C.red, text: '#FFFFFF' },
 };
 
 const SIZE_STYLES: Record<Size, { height: number; px: number; fontSize: number; radius: number }> = {

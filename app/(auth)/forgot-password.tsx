@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { resetPassword } from '@/services/auth';
+import { AuthScaffold, AuthField, authInputStyle } from '@/components/auth/AuthScaffold';
+import { C } from '@/constants/theme';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
@@ -21,65 +24,72 @@ export default function ForgotPasswordScreen() {
     else toast.error(res.error || 'Could not send reset email.');
   };
 
-  return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.container}>
-        <View style={styles.brand}>
-          <Image source={require('../../assets/stalkr-logo.png')} style={styles.logo} resizeMode="contain" />
-          <Text style={styles.title}>Reset password</Text>
+  if (sent) {
+    return (
+      <AuthScaffold
+        eyebrow="PASSWORD RESET"
+        title="Check your email"
+        subtitle={`If an account exists for ${email.trim()}, we've sent a link to reset your password. It expires shortly.`}
+        showBrand={false}
+      >
+        <View style={s.sentBadge}>
+          <Ionicons name="mail-open-outline" size={26} color={C.green} />
         </View>
+        <Button
+          label="Back to sign in"
+          onPress={() => router.replace('/(auth)/login')}
+          fullWidth
+          size="lg"
+        />
+      </AuthScaffold>
+    );
+  }
 
-        {sent ? (
-          <View style={styles.sentBox}>
-            <Text style={styles.sentTitle}>Check your email</Text>
-            <Text style={styles.sentText}>
-              If an account exists for {email.trim()}, we&rsquo;ve sent a link to reset your password.
-              Open it on this device to set a new one.
-            </Text>
-            <Button label="Back to sign in" onPress={() => router.replace('/(auth)/login')} fullWidth size="lg" />
-          </View>
-        ) : (
-          <View style={styles.form}>
-            <Text style={styles.sub}>Enter your email and we&rsquo;ll send you a reset link.</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="your@email.com"
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              returnKeyType="send"
-              onSubmitEditing={handleSend}
-              selectionColor="#22c55e"
-            />
-            <Button label="Send reset link" onPress={handleSend} loading={loading} fullWidth size="lg" />
-            <TouchableOpacity onPress={() => router.replace('/(auth)/login')} style={styles.backLink}>
-              <Text style={styles.backText}>‹ Back to sign in</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-    </KeyboardAvoidingView>
+  return (
+    <AuthScaffold
+      eyebrow="PASSWORD RESET"
+      title="Reset your password"
+      subtitle="Enter your email and we'll send you a link to set a new one."
+      showBrand={false}
+      footer={
+        <TouchableOpacity onPress={() => router.replace('/(auth)/login')}>
+          <Text style={s.footerLink}>Back to sign in</Text>
+        </TouchableOpacity>
+      }
+    >
+      <AuthField label="Email">
+        <TextInput
+          style={authInputStyle}
+          placeholder="you@example.com"
+          placeholderTextColor={C.textMuted}
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoComplete="email"
+          returnKeyType="send"
+          onSubmitEditing={handleSend}
+          selectionColor={C.green}
+        />
+      </AuthField>
+
+      <Button label="Send reset link" onPress={handleSend} loading={loading} fullWidth size="lg" />
+    </AuthScaffold>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0f' },
-  container: { flex: 1, padding: 24, justifyContent: 'center', gap: 28 },
-  brand: { alignItems: 'center', gap: 10 },
-  logo: { width: 84, height: 84 },
-  title: { color: '#f8fafc', fontSize: 26, fontWeight: '900', letterSpacing: 2 },
-  form: { gap: 14 },
-  sub: { color: 'rgba(255,255,255,0.55)', fontSize: 14, textAlign: 'center' },
-  input: {
-    backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 14, padding: 14, color: '#f8fafc', fontSize: 16, height: 52,
+const s = StyleSheet.create({
+  sentBadge: {
+    alignSelf: 'center',
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.greenDim,
+    borderWidth: 1,
+    borderColor: C.greenBorder,
+    marginBottom: 4,
   },
-  backLink: { alignItems: 'center', paddingVertical: 6 },
-  backText: { color: '#22c55e', fontSize: 14, fontWeight: '600' },
-  sentBox: { gap: 14, alignItems: 'center' },
-  sentTitle: { color: '#f8fafc', fontSize: 20, fontWeight: '800' },
-  sentText: { color: 'rgba(255,255,255,0.6)', fontSize: 14, textAlign: 'center', lineHeight: 21 },
+  footerLink: { color: C.green, fontSize: 13.5, fontWeight: '800' },
 });
