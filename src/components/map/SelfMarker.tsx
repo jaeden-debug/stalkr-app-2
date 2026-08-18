@@ -60,7 +60,12 @@ export const SelfMarker: React.FC = memo(() => {
   // when the per-crew entry was unset, which let the marker render dark while
   // the tracker was still broadcasting. See utils/broadcast.ts.
   const activeGroupId = useGroupStore((s) => s.activeGroupId);
-  const isDark = useLocationStore((s) => isDarkForCrew(s.groupBroadcastingStatus, activeGroupId));
+  const enforced = useGroupStore(
+    (s) => s.groups.find((g) => g.id === s.activeGroupId)?.tracking_mode === 'enforced',
+  );
+  const isDark = useLocationStore((s) =>
+    isDarkForCrew(s.groupBroadcastingStatus, activeGroupId, { enforced }),
+  );
 
   if (latitude == null || longitude == null || !userId) return null;
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;

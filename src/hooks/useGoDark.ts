@@ -47,7 +47,7 @@ export function useGoDark() {
   // Per-crew, matching what the tracker actually does. Reading the global flag
   // here meant going dark in crew A made crew B *look* dark too, while B kept
   // broadcasting.
-  const isDark = isDarkForCrew(groupBroadcastingStatus, activeGroupId);
+  const isDark = isDarkForCrew(groupBroadcastingStatus, activeGroupId, { enforced: isEnforced });
   const isBroadcasting = !isDark;
 
   const toggle = useCallback(async () => {

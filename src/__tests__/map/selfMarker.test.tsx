@@ -64,7 +64,12 @@ const setPosition = (accuracy = 10) =>
 beforeEach(() => {
   useAuthStore.setState({ user: { id: 'me' }, profile: { initials: 'JD' } } as never);
   useGroupStore.setState({ activeGroupId: 'g1' } as never);
-  useLocationStore.setState({ isBroadcasting: true, groupBroadcastingStatus: {} } as never);
+  // Broadcasting is now OPT-IN per crew — an empty map means dark. The fixture
+  // opts g1 in explicitly so these tests exercise the live puck.
+  useLocationStore.setState({
+    isBroadcasting: true,
+    groupBroadcastingStatus: { g1: true },
+  } as never);
   useMapStore.setState({
     myLocation: null,
     markers: [],
@@ -145,6 +150,16 @@ describe('heading honesty', () => {
     act(() => useSelfPoseStore.getState().setHeading(42));
 
     expect(screen.getByTestId('self-puck').props.image).toBe(SELF_PUCK_IMAGE.live);
+  });
+
+  it('renders the DARK puck when the crew has never been opted into', () => {
+    // Default-dark posture: no entry for this crew means not sharing.
+    useLocationStore.setState({ isBroadcasting: true, groupBroadcastingStatus: {} } as never);
+    render(<SelfMarker />);
+    act(() => setPosition());
+    act(() => useSelfPoseStore.getState().setHeading(42));
+
+    expect(screen.getByTestId('self-puck').props.image).toBe(SELF_PUCK_IMAGE.dark);
   });
 
   it('shows the dark, non-directional puck when the crew is dark', () => {

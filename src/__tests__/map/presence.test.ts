@@ -124,18 +124,28 @@ describe('Go Dark privacy boundary', () => {
   const isBroadcastingToGroup = (statusMap: Record<string, boolean>, groupId: string) =>
     isBroadcastingToCrew(statusMap, groupId);
 
-  it('an unset per-crew flag means LIVE — so the global flag alone cannot hide you', () => {
-    expect(isBroadcastingToGroup({}, 'g1')).toBe(true);
+  it('DEFAULTS TO DARK — joining a crew does not start sharing on its own', () => {
+    // Deliberate privacy posture: an absent entry means the member never opted
+    // in, and an un-opted-in member does not broadcast.
+    expect(isBroadcastingToGroup({}, 'g1')).toBe(false);
   });
 
-  it('only an explicit per-crew false actually stops the broadcast', () => {
+  it('only an explicit opt-in starts the broadcast', () => {
+    expect(isBroadcastingToGroup({ g1: true }, 'g1')).toBe(true);
     expect(isBroadcastingToGroup({ g1: false }, 'g1')).toBe(false);
   });
 
-  it('going dark in one crew does not affect another', () => {
-    const map = { g1: false };
-    expect(isBroadcastingToGroup(map, 'g1')).toBe(false);
-    expect(isBroadcastingToGroup(map, 'g2')).toBe(true);
+  it('opting into one crew does not opt you into another', () => {
+    const map = { g1: true };
+    expect(isBroadcastingToGroup(map, 'g1')).toBe(true);
+    expect(isBroadcastingToGroup(map, 'g2')).toBe(false);
+  });
+
+  it('a crew that enforces tracking overrides both the default and an opt-out', () => {
+    expect(isBroadcastingToCrew({}, 'g1', { enforced: true })).toBe(true);
+    expect(isBroadcastingToCrew({ g1: false }, 'g1', { enforced: true })).toBe(true);
+    // ...and the marker agrees, so an enforced crew never renders a false "dark".
+    expect(isDarkForCrew({ g1: false }, 'g1', { enforced: true })).toBe(false);
   });
 
   it('the marker and the tracker agree on darkness for EVERY state', () => {
@@ -145,15 +155,18 @@ describe('Go Dark privacy boundary', () => {
     const perCrewValues: Array<boolean | undefined> = [undefined, true, false];
 
     for (const perCrew of perCrewValues) {
-      const map: Record<string, boolean> = perCrew === undefined ? {} : { g1: perCrew };
+      for (const enforced of [false, true]) {
+        const map: Record<string, boolean> = perCrew === undefined ? {} : { g1: perCrew };
+        const scope = { enforced };
 
-      const uiSaysDark = isDarkForCrew(map, 'g1');          // what SelfMarker renders
-      const actuallyBroadcasting = isBroadcastingToGroup(map, 'g1'); // what the tracker does
+        const uiSaysDark = isDarkForCrew(map, 'g1', scope);              // SelfMarker
+        const actuallyBroadcasting = isBroadcastingToCrew(map, 'g1', scope); // tracker
 
-      // The leak: UI claims hidden while the tracker is still transmitting.
-      expect(uiSaysDark && actuallyBroadcasting).toBe(false);
-      // And the inverse confusion: UI claims live while nothing is sent.
-      expect(!uiSaysDark && !actuallyBroadcasting).toBe(false);
+        // The leak: UI claims hidden while the tracker is still transmitting.
+        expect(uiSaysDark && actuallyBroadcasting).toBe(false);
+        // The inverse confusion: UI claims live while nothing is sent.
+        expect(!uiSaysDark && !actuallyBroadcasting).toBe(false);
+      }
     }
   });
 

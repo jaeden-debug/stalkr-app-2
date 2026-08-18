@@ -22,9 +22,30 @@ import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplet
 import { useMapStore } from '@/store/useMapStore';
 import { C } from '@/constants/theme';
 
+/**
+ * One height for every part of the search bar.
+ *
+ * The bar is drawn as a single pill split into two siblings — a left icon cap
+ * and the text input — joined by removing the border on the facing edge and
+ * rounding only the outer corners. That only reads as ONE control if both
+ * halves are the same height. The icon cap previously had no height at all, so
+ * it collapsed to its 18px glyph while the input stayed at 52: two differently
+ * sized boxes with mismatched radii, which is the "two sizes" bug.
+ *
+ * Both halves and their container now derive from this constant, so they cannot
+ * drift apart again.
+ */
+const SEARCH_BAR_HEIGHT = 52;
+const SEARCH_ICON_WIDTH = 46;
+
+// Places is a separate API from the Maps SDK. Falling back to the IOS key on
+// Android would send requests with a key restricted to an iOS bundle id, which
+// fails closed with an opaque error.
 const GOOGLE_API_KEY =
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
-  process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY ||
+  (Platform.OS === 'ios'
+    ? process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY
+    : process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY) ||
   '';
 
 export const SearchOverlay: React.FC = () => {
@@ -109,21 +130,41 @@ const s = StyleSheet.create({
   title: { color: '#FFFFFF', fontSize: 20, fontWeight: '900', letterSpacing: 1.5 },
 
   acContainer: { flex: 1 },
-  acInputContainer: { backgroundColor: 'transparent', paddingHorizontal: 0 },
+  acInputContainer: {
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    // Pin the row to the bar height and stretch both halves to fill it, so the
+    // cap and the input are always the same size regardless of glyph metrics or
+    // platform TextInput sizing.
+    height: SEARCH_BAR_HEIGHT,
+    alignItems: 'stretch',
+  },
   searchIcon: {
-    justifyContent: 'center', alignItems: 'center', paddingLeft: 14,
+    width: SEARCH_ICON_WIDTH,
+    height: SEARCH_BAR_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.06)',
-    borderTopLeftRadius: 14, borderBottomLeftRadius: 14,
-    borderWidth: 1.5, borderRightWidth: 0, borderColor: 'rgba(255,255,255,0.12)',
+    borderTopLeftRadius: 14,
+    borderBottomLeftRadius: 14,
+    borderWidth: 1.5,
+    borderRightWidth: 0,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   acInput: {
+    flex: 1,
     backgroundColor: 'rgba(255,255,255,0.06)',
     color: '#FFFFFF',
-    height: 52,
-    borderRadius: 14,
+    height: SEARCH_BAR_HEIGHT,
+    borderTopRightRadius: 14,
+    borderBottomRightRadius: 14,
     borderTopLeftRadius: 0,
     borderBottomLeftRadius: 0,
     paddingHorizontal: 12,
+    // Android centres text by baseline unless padding is zeroed, which made the
+    // right half look taller than the cap even at equal heights.
+    paddingVertical: 0,
+    textAlignVertical: 'center',
     fontSize: 15,
     fontWeight: '600',
     borderWidth: 1.5,

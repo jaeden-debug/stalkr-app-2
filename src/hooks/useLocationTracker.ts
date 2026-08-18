@@ -316,7 +316,9 @@ export function useLocationTracker() {
             let wroteAny = false;
 
             for (const g of groups) {
-              const liveForGroup = isBroadcastingToCrew(statusMap, g.id);
+              const liveForGroup = isBroadcastingToCrew(statusMap, g.id, {
+                enforced: g.tracking_mode === 'enforced',
+              });
               if (!liveForGroup) {
                 // Mark offline once when a crew is dark (keeps last known position).
                 if (!offlineMarkedGroups.current.has(g.id)) {
@@ -355,7 +357,13 @@ export function useLocationTracker() {
 
             // Zone checks run against the active crew's zones (local awareness).
             const activeGid = useGroupStore.getState().activeGroupId;
-            if (activeGid && isBroadcastingToCrew(statusMap, activeGid)) {
+            const activeGroup = groups.find((g) => g.id === activeGid);
+            if (
+              activeGid &&
+              isBroadcastingToCrew(statusMap, activeGid, {
+                enforced: activeGroup?.tracking_mode === 'enforced',
+              })
+            ) {
               await checkZones(latitude, longitude, userId, activeGid);
             }
           }
