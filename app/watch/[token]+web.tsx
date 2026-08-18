@@ -30,6 +30,7 @@ interface SessionInfo {
   started_at: string;
   arrived_at: string | null;
   ended_at: string | null;
+  eta_at: string | null;
   last_latitude: number | null;
   last_longitude: number | null;
   last_heading: number | null;
@@ -46,6 +47,32 @@ interface LivePayload {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Straight-line distance in km. */
+function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLng = ((bLng - aLng) * Math.PI) / 180;
+  const p =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(p));
+}
+
+function formatKm(km: number): string {
+  return km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(km < 10 ? 1 : 0)} km`;
+}
+
+function formatClock(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -220,6 +247,26 @@ export default function WatchPage() {
   const batteryPct =
     session?.battery_level != null ? Math.round(session.battery_level * 100) : null;
 
+  // How far is left, straight-line. Deliberately not a routed distance: we have
+  // no routing here, and quoting a road distance we did not compute would be a
+  // number that looks authoritative and is not. "2.4 km away" is honest and is
+  // what a watcher actually wants to know.
+  const remainingKm =
+    live && session?.destination_latitude != null && session?.destination_longitude != null
+      ? haversineKm(
+          live.latitude,
+          live.longitude,
+          session.destination_latitude,
+          session.destination_longitude,
+        )
+      : null;
+
+  // ETA is the traveller's own estimate, so it is labelled as one. Presenting
+  // it as a computed arrival time would give it authority it has not earned.
+  const etaMs = session?.eta_at ? new Date(session.eta_at).getTime() : NaN;
+  const etaKnown = Number.isFinite(etaMs);
+  const overdueMin = etaKnown ? Math.floor((Date.now() - etaMs) / 60000) : 0;
+
   // ── Email opt-in ──────────────────────────────────────────────────────────
   const handleEmailSubmit = useCallback(async () => {
     if (!session || !email.trim()) return;
@@ -336,6 +383,14 @@ export default function WatchPage() {
           </p>
           {session.destination_name && (
             <p style={styles.headerSub}>→ {session.destination_name}</p>
+          )}
+          {etaKnown && !arrived && !cancelled && (
+            <p style={{ ...styles.headerSub, color: overdueMin > 0 ? '#F87171' : undefined }}>
+              {overdueMin > 0
+                ? `Expected ${formatDuration(overdueMin)} ago`
+                : `Expected by ${formatClock(etaMs)}`}
+              {remainingKm != null && ` · ${formatKm(remainingKm)} away`}
+            </p>
           )}
         </div>
       </div>

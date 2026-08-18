@@ -208,6 +208,26 @@ export const TacticalHud: React.FC = () => {
             {etaInfo && (
               <Text style={s.journeyMeta} numberOfLines={1}>{formatSpeed(etaInfo.speed)}</Text>
             )}
+            {/* The DEADLINE the traveller set, which is distinct from the
+                speed-derived ETA above. This is what overdue detection fires
+                against, so it has to be visible — a nudge whose deadline the
+                traveller never saw arrives as an ambush. */}
+            {!!activeJourney.eta_at && (
+              <Text
+                style={[
+                  s.journeyMeta,
+                  Date.now() > new Date(activeJourney.eta_at).getTime() && { color: C.red },
+                ]}
+                numberOfLines={1}
+              >
+                {Date.now() > new Date(activeJourney.eta_at).getTime()
+                  ? 'PAST YOUR EXPECTED ARRIVAL'
+                  : `Due by ${new Date(activeJourney.eta_at).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}`}
+              </Text>
+            )}
           </View>
           <TouchableOpacity style={s.journeyShareBtn} onPress={handleShareJourney} activeOpacity={0.8}>
             <Ionicons name="share-social" size={13} color={C.blue} />
