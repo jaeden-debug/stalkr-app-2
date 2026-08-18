@@ -69,21 +69,67 @@ Deno.serve(async (req) => {
       fromUserId?: string;
     };
 
-    if (!tokens?.length) {
-      return json({ sent: 0, filtered: 0 });
+    const isSafetyOverride = type === 'sos'; // SOS always delivers (life-safety)
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    );
+
+    // ── Recipient resolution ─────────────────────────────────────────────────
+    // Build (token, userId) PAIRS rather than trusting two parallel arrays.
+    //
+    // Two problems this solves:
+    //  1. device_push_tokens was written on every registration but never read by
+    //     anything, so a user signed into two devices only received pushes on
+    //     whichever registered last.
+    //  2. Requiring the CLIENT to supply tokens means each crew member holds
+    //     every other member's push token, which is enough to send them
+    //     arbitrary notifications via Expo's public API. Resolving server-side
+    //     with the service role removes that exposure.
+    //
+    // Client-supplied tokens are still honoured so an older app build keeps
+    // working, but server resolution wins when recipient ids are present.
+    let pairs: { token: string; userId?: string }[] = [];
+
+    if (recipientUserIds?.length) {
+      const { data: devices } = await supabase
+        .from('device_push_tokens')
+        .select('user_id, token')
+        .in('user_id', recipientUserIds);
+
+      pairs = (devices ?? []).map((d: any) => ({ token: d.token, userId: d.user_id }));
+
+      // Fall back to whatever the client sent for anyone with no registered
+      // device row yet (e.g. registered before device_push_tokens existed).
+      if (tokens?.length && tokens.length === recipientUserIds.length) {
+        const covered = new Set(pairs.map((p) => p.userId));
+        recipientUserIds.forEach((uid, i) => {
+          if (!covered.has(uid) && tokens[i]) pairs.push({ token: tokens[i], userId: uid });
+        });
+      }
+    } else if (tokens?.length) {
+      pairs = tokens.map((t) => ({ token: t }));
     }
 
-    const isSafetyOverride = type === 'sos'; // SOS always delivers (life-safety)
-    const haveRecipients = !!recipientUserIds?.length && recipientUserIds.length === tokens.length;
+    // De-duplicate: the same physical device can appear via both paths.
+    const seenTokens = new Set<string>();
+    pairs = pairs.filter((p) => {
+      if (!p.token || seenTokens.has(p.token)) return false;
+      seenTokens.add(p.token);
+      return true;
+    });
+
+    if (pairs.length === 0) {
+      return json({ sent: 0, filtered: 0, reason: 'no_registered_devices' });
+    }
+
+    const haveRecipients = pairs.some((p) => p.userId);
     const optedOut = new Set<string>();
 
     // Layered server-side filtering: global → per-crew → per-member.
     if (haveRecipients && !isSafetyOverride) {
-      const supabase = createClient(
-        Deno.env.get('SUPABASE_URL')!,
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-      );
-      const ids = recipientUserIds!;
+      const ids = [...new Set(pairs.map((p) => p.userId).filter(Boolean))] as string[];
 
       const prefColumn = TYPE_TO_COLUMN[type];
       if (prefColumn) {
@@ -122,14 +168,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    const allowedTokens = tokens.filter((token, i) => {
-      if (!token?.startsWith('ExponentPushToken')) return false;
-      if (!haveRecipients) return true;
-      return !optedOut.has(recipientUserIds![i]);
-    });
+    const allowedTokens = pairs
+      .filter((p) => {
+        if (!p.token?.startsWith('ExponentPushToken')) return false;
+        if (!p.userId) return true;
+        return !optedOut.has(p.userId);
+      })
+      .map((p) => p.token);
 
     if (allowedTokens.length === 0) {
-      return json({ sent: 0, filtered: tokens.length });
+      return json({ sent: 0, filtered: pairs.length });
     }
 
     const messages = allowedTokens.map((to) => ({
@@ -152,7 +200,7 @@ Deno.serve(async (req) => {
 
     return json({
       sent: allowedTokens.length,
-      filtered: tokens.length - allowedTokens.length,
+      filtered: pairs.length - allowedTokens.length,
       expo: expoBody,
     });
   } catch (err) {

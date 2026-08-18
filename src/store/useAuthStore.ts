@@ -4,6 +4,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Session } from '@supabase/supabase-js';
 import type { Profile } from '@/types/models';
 import * as authService from '@/services/auth';
+import { unregisterPushToken } from '@/services/notifications';
 import { supabase } from '@/services/supabase';
 
 interface AuthState {
@@ -132,7 +133,14 @@ export const useAuthStore = create<AuthState>()(
 
       signOut: async () => {
         const userId = get().session?.user?.id;
-        if (userId) await authService.markOffline(userId).catch(() => {});
+        if (userId) {
+          await authService.markOffline(userId).catch(() => {});
+          // Revoke THIS device's push registration before the session goes away.
+          // Otherwise the phone kept receiving the old account's crew alerts —
+          // including SOS — after sign-out.
+          const token = get().profile?.push_token ?? null;
+          await unregisterPushToken(userId, token).catch(() => {});
+        }
         await authService.signOut();
         set({ session: null, profile: null, user: null, error: null });
         // Purge every per-user store so the next account starts clean (no leaked

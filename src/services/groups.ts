@@ -143,7 +143,7 @@ export async function fetchGroupMembers(groupId: string): Promise<GroupMember[]>
     .from('group_members')
     .select(`
       *,
-      profile:profiles (id, display_name, nickname, initials, avatar_url, phone)
+      profile:profiles (id, display_name, nickname, initials, avatar_url, phone, push_token)
     `)
     .eq('group_id', groupId);
 

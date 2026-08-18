@@ -200,6 +200,27 @@ export async function sendPushNotification(
   }
 }
 
+/**
+ * Remove THIS device's push registration.
+ *
+ * Without this, signing out left the token attached to the old account: the
+ * phone kept receiving that crew's alerts — including SOS — for someone who is
+ * no longer signed in. Only this device's row is removed, so the user's other
+ * devices keep working.
+ */
+export async function unregisterPushToken(userId: string, token: string | null): Promise<void> {
+  try {
+    if (token) {
+      await supabase.from('device_push_tokens').delete().eq('token', token);
+    }
+    // profiles.push_token is a single column shared by every device, so only
+    // clear it if it still points at the device that is signing out.
+    await supabase.from('profiles').update({ push_token: null }).eq('id', userId).eq('push_token', token);
+  } catch (err) {
+    console.error('[notifications] unregister failed:', err);
+  }
+}
+
 export async function sendLocalNotification(
   title: string,
   body: string,
