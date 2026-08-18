@@ -17,6 +17,7 @@ import { SafetyCenter } from '@/components/safety/SafetyCenter';
 import { MeasurePanel } from '@/components/map/MeasurePanel';
 import { FilterSheet } from '@/components/map/FilterSheet';
 import { JourneySheet } from '@/components/journey/JourneySheet';
+import { JourneyOverduePrompt } from '@/components/journey/JourneyOverduePrompt';
 import { JourneySummary } from '@/components/journey/JourneySummary';
 import { useMapStore } from '@/store/useMapStore';
 import { useLocationTracker } from '@/hooks/useLocationTracker';
@@ -52,6 +53,7 @@ export default function MapScreen() {
       <MeasurePanel />
       <FilterSheet />
       <JourneySheet />
+      <JourneyOverduePrompt />
       <JourneySummary />
       <PlaceCard />
       <SearchOverlay />

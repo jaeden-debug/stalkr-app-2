@@ -333,6 +333,15 @@ export interface DbSession {
   destination_longitude: number | null;
   arrived_at: string | null;
   auto_end_at: string | null;
+  eta_at: string | null;
+  overdue_grace_minutes: number;
+  overdue_state: 'none' | 'nudged' | 'alerted';
+  overdue_nudged_at: string | null;
+  overdue_alerted_at: string | null;
+  last_latitude: number | null;
+  last_longitude: number | null;
+  last_heading: number | null;
+  last_position_at: string | null;
   watcher_push_tokens: string[];
   notify_on_end: boolean;
 }

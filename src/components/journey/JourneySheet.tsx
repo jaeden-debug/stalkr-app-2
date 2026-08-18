@@ -44,6 +44,10 @@ export const JourneySheet: React.FC = () => {
   const [showCoords, setShowCoords] = useState(false);
   const [watchers, setWatchers] = useState<JourneyWatcher[]>([]);
   const [message, setMessage] = useState('');
+  // Expected duration arms overdue detection. Null means "don't monitor" — an
+  // honest option, and better than inventing a deadline we cannot justify and
+  // then alarming people against it.
+  const [etaMinutes, setEtaMinutes] = useState<number | null>(60);
   const [starting, setStarting] = useState(false);
 
   const [emergency, setEmergency] = useState<EmergencyContact[]>([]);
@@ -67,7 +71,7 @@ export const JourneySheet: React.FC = () => {
       setDest(null);
       setEditingDest(true);
     }
-    setWatchers([]); setMessage(''); setShowCoords(false); setStarting(false);
+    setWatchers([]); setMessage(''); setShowCoords(false); setStarting(false); setEtaMinutes(60);
   }, [open, prefill]);
 
   useEffect(() => {
@@ -149,6 +153,7 @@ export const JourneySheet: React.FC = () => {
       const session = await startJourney({
         name: dest.name, destinationName: dest.name, destinationAddress: dest.address,
         destinationLat: dest.lat, destinationLng: dest.lng, message: message.trim() || undefined, watchers,
+        etaMinutes,
       });
       setStarting(false);
       if (!session) Alert.alert('Could not start', 'Something went wrong starting your journey. Please try again.');
@@ -332,6 +337,35 @@ export const JourneySheet: React.FC = () => {
                   </View>
                 )}
 
+                {/* Expected arrival — arms overdue detection */}
+                <Text style={s.sectionLabel}>EXPECTED ARRIVAL</Text>
+                <View style={s.etaRow}>
+                  {[30, 60, 120, 240].map((m) => (
+                    <TouchableOpacity
+                      key={m}
+                      style={[s.etaChip, etaMinutes === m && s.etaChipOn]}
+                      onPress={() => setEtaMinutes(m)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[s.etaChipText, etaMinutes === m && s.etaChipTextOn]}>
+                        {m < 60 ? `${m}m` : `${m / 60}h`}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  <TouchableOpacity
+                    style={[s.etaChip, etaMinutes === null && s.etaChipOn]}
+                    onPress={() => setEtaMinutes(null)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[s.etaChipText, etaMinutes === null && s.etaChipTextOn]}>OFF</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={s.etaHint}>
+                  {etaMinutes
+                    ? `If you haven't arrived by then, we'll check on you first — and tell your watchers if you don't respond.`
+                    : `No one will be alerted if you don't arrive. Your journey is still shared live.`}
+                </Text>
+
                 {/* Message */}
                 <Text style={s.sectionLabel}>MESSAGE (OPTIONAL)</Text>
                 <TextInput
@@ -367,6 +401,16 @@ const s = StyleSheet.create({
   title: { color: '#FFFFFF', fontSize: 18, fontWeight: '900', letterSpacing: 1 },
   subtitle: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 3 },
   closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+  etaRow: { flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
+  etaChip: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  etaChipOn: { borderColor: C.green, backgroundColor: 'rgba(74,222,128,0.12)' },
+  etaChipText: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '700' },
+  etaChipTextOn: { color: C.green },
+  etaHint: { color: 'rgba(255,255,255,0.4)', fontSize: 11, lineHeight: 15, marginBottom: 16 },
   sectionLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: '900', letterSpacing: 1.4, marginTop: 14, marginBottom: 8 },
   subLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 11, marginBottom: 6 },
   placesWrap: { zIndex: 9000, minHeight: 54 },

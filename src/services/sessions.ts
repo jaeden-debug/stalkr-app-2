@@ -114,6 +114,25 @@ export async function joinSessionByInviteCode(
  * Fire-and-forget by design: a watcher's channel must never be able to block
  * or fail the traveller's own state change.
  */
+/**
+ * Push a journey's deadline back — "still going, I'm fine".
+ *
+ * Re-arms the overdue ladder server-side, so a journey that was already nudged
+ * will nudge again against the new deadline instead of sliding past it in
+ * silence.
+ */
+export async function extendJourneyEta(
+  sessionId: string,
+  minutes: number,
+): Promise<string | null> {
+  const { data, error } = await supabase.rpc('extend_journey_eta', {
+    p_session_id: sessionId,
+    p_minutes: minutes,
+  });
+  if (error) return null;
+  return data as string;
+}
+
 export async function markInvitesSent(
   sessionId: string,
   match: { channel: 'phone' } | { channel: 'email' } | { userIds: string[] },

@@ -32,6 +32,12 @@ export interface StartJourneyOptions {
   destinationLng?: number;
   message?: string;
   watchers: JourneyWatcher[];
+  /**
+   * Minutes from now the traveller expects to arrive. This is what arms
+   * overdue detection — without it the journey is a live viewer with no
+   * timeout, and silence carries no meaning.
+   */
+  etaMinutes?: number | null;
 }
 
 interface SessionStoreState {
@@ -59,6 +65,7 @@ interface SessionStoreState {
   closeJourneySheet: () => void;
   setSummarySession: (s: Session | null) => void;
   startJourney: (opts: StartJourneyOptions) => Promise<Session | null>;
+  extendJourneyEta: (sessionId: string, minutes: number) => Promise<boolean>;
 
   loadGroupSessions: (groupId: string) => Promise<void>;
   loadMyJourneySession: () => Promise<void>;
@@ -115,6 +122,9 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
       destination_longitude: opts.destinationLng ?? null,
       message: opts.message ?? null,
       notify_on_end: true,
+      eta_at: opts.etaMinutes
+        ? new Date(Date.now() + opts.etaMinutes * 60_000).toISOString()
+        : null,
     } as any);
     if (!session) return null;
 
@@ -193,6 +203,21 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
       journeyPrefill: null,
     }));
     return session;
+  },
+
+  extendJourneyEta: async (sessionId, minutes) => {
+    const eta = await sessionService.extendJourneyEta(sessionId, minutes);
+    if (!eta) return false;
+    set((st) => ({
+      activeJourneySession:
+        st.activeJourneySession?.id === sessionId
+          ? { ...st.activeJourneySession, eta_at: eta, overdue_state: 'none' }
+          : st.activeJourneySession,
+      sessions: st.sessions.map((x) =>
+        x.id === sessionId ? { ...x, eta_at: eta, overdue_state: 'none' } : x,
+      ),
+    }));
+    return true;
   },
 
   loadGroupSessions: async (groupId) => {
