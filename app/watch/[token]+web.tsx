@@ -190,14 +190,25 @@ export default function WatchPage() {
     setEmailLoading(true);
     setEmailError('');
     try {
-      await addEmailWatcher(session.id, email.trim());
+      // The token, not session.id — subscription is gated on the capability the
+      // link carries, so a session UUID alone cannot subscribe anyone.
+      await addEmailWatcher(token, email.trim());
       setEmailSent(true);
-    } catch {
-      setEmailError('Something went wrong. Try again.');
+    } catch (e: any) {
+      const code = String(e?.message ?? '');
+      if (code.includes('WATCHER_LIMIT_REACHED')) {
+        setEmailError('This journey already has the maximum number of followers.');
+      } else if (code.includes('SESSION_NOT_FOUND')) {
+        setEmailError('This journey has ended, so there is nothing left to follow.');
+      } else if (code.includes('INVALID_EMAIL')) {
+        setEmailError('Please enter a valid email address.');
+      } else {
+        setEmailError('Something went wrong. Try again.');
+      }
     } finally {
       setEmailLoading(false);
     }
-  }, [session, email]);
+  }, [session, email, token]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   if (notFound) {

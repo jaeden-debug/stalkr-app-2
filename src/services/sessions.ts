@@ -177,12 +177,23 @@ export async function addWatcher(
   } as any);
 }
 
-/** Add a non-member watcher by email (called from watch page via RPC). */
-export async function addEmailWatcher(sessionId: string, email: string): Promise<void> {
-  await supabase.rpc('add_session_email_watcher', {
-    p_session_id: sessionId,
+/**
+ * Subscribe an email address to a journey from the public watch page.
+ *
+ * Keyed on the WATCH TOKEN, not the session id. The token is the capability —
+ * holding the link already grants live view of the journey, so it is the right
+ * thing to gate subscription on. Keying on session id let anyone who learned a
+ * session UUID subscribe an arbitrary address to someone else's journey.
+ *
+ * Throws with a machine-readable code so the caller can distinguish a full
+ * watcher list from a dead link from a genuine failure.
+ */
+export async function addEmailWatcher(watchToken: string, email: string): Promise<void> {
+  const { error } = await supabase.rpc('add_watch_email_subscriber', {
+    p_token: watchToken,
     p_email: email,
   });
+  if (error) throw new Error(error.message);
 }
 
 /** Get all push tokens for watchers of a session (for arrival push). */

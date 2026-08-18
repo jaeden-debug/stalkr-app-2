@@ -206,6 +206,25 @@ describe('cleanDeviceContacts', () => {
     expect(cleanDeviceContacts(null as never)).toEqual([]);
     expect(cleanDeviceContacts([null, undefined] as never)).toEqual([]);
   });
+
+  // Ported from src/utils/contacts.test.ts, a pre-jest standalone script that
+  // called process.exit() and so terminated the whole jest run before it could
+  // print a summary — every CI run reported success vacuously.
+  it('names an unnamed contact rather than showing a blank row', () => {
+    const [c] = cleanDeviceContacts([
+      { id: 1, name: '', phoneNumbers: [{ number: '777' }], emails: [] },
+    ] as RawContact[]);
+    expect(c.name).toBe('Unknown');
+  });
+
+  it('skips a null number and uses the next usable one', () => {
+    // A contact card can carry an empty slot before a real number; taking the
+    // first entry blindly would drop the contact or send to nothing.
+    const [c] = cleanDeviceContacts([
+      { id: 1, name: 'Gap', phoneNumbers: [{ number: null }, { number: '777' }], emails: [] },
+    ] as never);
+    expect(c.value).toBe('777');
+  });
 });
 
 describe('filterContacts', () => {
