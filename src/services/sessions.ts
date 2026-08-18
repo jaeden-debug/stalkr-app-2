@@ -34,6 +34,33 @@ export async function fetchMySessions(userId: string): Promise<Session[]> {
   return data as Session[];
 }
 
+/**
+ * Journeys someone else invited me to watch.
+ *
+ * Necessary because the sessions list is otherwise keyed on group_id, so a
+ * watcher on a journey started outside their crew — or on a solo journey with
+ * no crew at all — would be told "X started a journey" and then find nothing
+ * anywhere in the app. RLS backs this: being named a watcher is what grants
+ * the read.
+ */
+export async function fetchWatchedSessions(userId: string): Promise<Session[]> {
+  const { data: rows } = await supabase
+    .from('session_watchers')
+    .select('session_id')
+    .eq('user_id', userId);
+  const ids = (rows ?? []).map((r: { session_id: string }) => r.session_id);
+  if (!ids.length) return [];
+
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('*')
+    .in('id', ids)
+    .order('started_at', { ascending: false })
+    .limit(50);
+  if (error || !data) return [];
+  return data as Session[];
+}
+
 export async function fetchActiveSession(groupId: string): Promise<Session | null> {
   const { data, error } = await supabase
     .from('sessions')

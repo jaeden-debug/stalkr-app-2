@@ -59,7 +59,7 @@ export default function SessionsScreen() {
   const router = useRouter();
   const {
     sessions, isLoading, activeJourneySession,
-    loadGroupSessions, loadMyJourneySession,
+    loadGroupSessions, loadMyJourneySession, loadWatchedSessions, watchedSessions,
     createSession, endSession, markArrived, joinSessionByCode,
     journeyDraft, clearJourneyDraft,
   } = useSessionStore();
@@ -95,6 +95,7 @@ export default function SessionsScreen() {
   useEffect(() => {
     if (activeGroup?.id) loadGroupSessions(activeGroup.id);
     loadMyJourneySession();
+    loadWatchedSessions();
   }, [activeGroup?.id]);
 
   // Pre-fill + open the create sheet when arriving from a map-search place.
@@ -266,12 +267,18 @@ export default function SessionsScreen() {
     );
   };
 
+  // Journeys I was invited to watch belong here too. Without them a watcher
+  // gets "X started a journey", opens the app, and finds nothing — the list is
+  // otherwise keyed on crew, so a journey started outside their crew (or with
+  // no crew at all) is invisible to the very people asked to watch it.
+  const seen = new Set<string>();
   const allSessions = [
     ...(activeJourneySession && !sessions.find((s) => s.id === activeJourneySession.id)
       ? [activeJourneySession]
       : []),
     ...sessions,
-  ];
+    ...watchedSessions,
+  ].filter((s) => (seen.has(s.id) ? false : (seen.add(s.id), true)));
 
   return (
     <SafeAreaView style={styles.root}>
@@ -329,6 +336,7 @@ export default function SessionsScreen() {
             onRefresh={() => {
               if (activeGroup?.id) loadGroupSessions(activeGroup.id);
               loadMyJourneySession();
+              loadWatchedSessions();
             }}
             tintColor="#22c55e"
           />

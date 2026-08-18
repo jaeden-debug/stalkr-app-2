@@ -14,7 +14,12 @@ export interface JourneyWatcher {
   email?: string | null;
   userId?: string | null;
   pushToken?: string | null;
-  source: 'emergency' | 'contact' | 'manual';
+  /**
+   * 'crew' watchers are the reliable ones: we dispatch their push ourselves,
+   * so delivery is something we actually perform rather than something we hand
+   * to the OS compose sheet and hope the user presses Send on.
+   */
+  source: 'emergency' | 'contact' | 'manual' | 'crew';
 }
 
 export interface JourneyPrefill {
@@ -44,6 +49,8 @@ interface SessionStoreState {
   sessions: Session[];
   activeSession: Session | null;       // group session (for the group feed)
   activeJourneySession: Session | null; // personal journey session (for tracking)
+  /** Journeys other people invited me to watch. */
+  watchedSessions: Session[];
   isLoading: boolean;
   error: string | null;
 
@@ -69,6 +76,7 @@ interface SessionStoreState {
 
   loadGroupSessions: (groupId: string) => Promise<void>;
   loadMyJourneySession: () => Promise<void>;
+  loadWatchedSessions: () => Promise<void>;
   createSession: (options: {
     name: string;
     groupId?: string | null;
@@ -91,6 +99,7 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
   sessions: [],
   activeSession: null,
   activeJourneySession: null,
+  watchedSessions: [],
   isLoading: false,
   error: null,
   journeyDraft: null,
@@ -218,6 +227,12 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
       ),
     }));
     return true;
+  },
+
+  loadWatchedSessions: async () => {
+    const userId = useAuthStore.getState().session?.user?.id;
+    if (!userId) return;
+    set({ watchedSessions: await sessionService.fetchWatchedSessions(userId) });
   },
 
   loadGroupSessions: async (groupId) => {

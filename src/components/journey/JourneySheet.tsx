@@ -59,6 +59,15 @@ export const JourneySheet: React.FC = () => {
   const [phoneContacts, setPhoneContacts] = useState<DeviceContact[]>([]);
   const [contactSearch, setContactSearch] = useState('');
 
+  // Crew members are watcher candidates too, and better ones: they get a push
+  // we send and can confirm, rather than an SMS compose sheet the user still
+  // has to press Send on.
+  const groupMembers = useGroupStore((st) => st.groupMembers);
+  const myUserId = useAuthStore((st) => st.user?.id);
+  const crewCandidates = groupMembers.filter(
+    (m) => m.user_id !== myUserId && m.profile?.push_token,
+  );
+
   const placesRef = useRef<any>(null);
 
   // Reset + apply prefill each time the sheet opens.
@@ -256,12 +265,54 @@ export const JourneySheet: React.FC = () => {
                         <View style={s.watcherAvatar}><Text style={s.watcherInit}>{w.name.slice(0, 1).toUpperCase()}</Text></View>
                         <View style={{ flex: 1 }}>
                           <Text style={s.watcherName} numberOfLines={1}>{w.name}</Text>
-                          <Text style={s.watcherMeta} numberOfLines={1}>{(w.phone || w.email) ?? 'In-app'} · {w.source === 'emergency' ? 'Emergency Contact' : w.source === 'contact' ? 'Phone Contact' : 'Manual'}</Text>
+                          <Text style={s.watcherMeta} numberOfLines={1}>{(w.phone || w.email) ?? 'In-app'} · {w.source === 'emergency' ? 'Emergency Contact' : w.source === 'contact' ? 'Phone Contact' : w.source === 'crew' ? 'Crew · notified in app' : 'Manual'}</Text>
                         </View>
                         <TouchableOpacity onPress={() => removeWatcher(w.key)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}><Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.4)" /></TouchableOpacity>
                       </View>
                     ))}
                   </View>
+                )}
+
+                {crewCandidates.length > 0 && (
+                  <>
+                    <Text style={s.subLabel}>From your crew</Text>
+                    <View style={s.chipWrap}>
+                      {crewCandidates.map((m) => {
+                        const key = `crew-${m.user_id}`;
+                        const added = watchers.some((w) => w.key === key);
+                        const name =
+                          m.nickname_override ||
+                          m.profile?.nickname ||
+                          m.profile?.display_name ||
+                          'Crew member';
+                        return (
+                          <TouchableOpacity
+                            key={m.id}
+                            style={[s.contactChip, added && s.contactChipAdded]}
+                            onPress={() =>
+                              added
+                                ? removeWatcher(key)
+                                : addWatcher({
+                                    key,
+                                    name,
+                                    userId: m.user_id,
+                                    pushToken: m.profile?.push_token ?? null,
+                                    source: 'crew',
+                                  })
+                            }
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons
+                              name={added ? 'checkmark-circle' : 'shield-outline'}
+                              size={13}
+                              color={added ? C.green : 'rgba(255,255,255,0.5)'}
+                            />
+                            <Text style={[s.contactChipText, added && { color: C.green }]}>{name}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </>
                 )}
 
                 {emergency.length > 0 && (
