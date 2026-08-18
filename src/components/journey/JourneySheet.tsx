@@ -11,7 +11,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import * as Contacts from 'expo-contacts';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { useSessionStore, type JourneyWatcher } from '@/store/useSessionStore';
 import { useMapStore } from '@/store/useMapStore';
@@ -22,7 +21,8 @@ import { useRouter } from 'expo-router';
 import { requireFeature } from '@/utils/paywall';
 import { fetchEmergencyContacts } from '@/services/emergencyContacts';
 import { getDistance, formatDistanceBoth } from '@/utils/distance';
-import { cleanDeviceContacts, filterContacts, type DeviceContact } from '@/utils/contacts';
+import { loadDeviceContacts, needsSettings } from '@/services/deviceContacts';
+import { filterContacts, type DeviceContact } from '@/utils/contacts';
 import { C } from '@/constants/theme';
 import type { EmergencyContact } from '@/types/models';
 
@@ -87,60 +87,44 @@ export const JourneySheet: React.FC = () => {
     // Modal on iOS). Toggle closed if already open.
     if (contactsOpen) { setContactsOpen(false); return; }
 
-    // The native module is only present in a real dev/production build — if the
-    // app was launched from an older binary (before expo-contacts was added),
-    // requestPermissionsAsync won't exist. Tell the user plainly to rebuild.
-    if (typeof Contacts.requestPermissionsAsync !== 'function') {
-      Alert.alert(
-        'Contacts unavailable',
-        'Phone-contact import needs the latest app build. Rebuild the app, or add the watcher manually for now.',
-      );
-      setManualOpen(true);
-      return;
-    }
-
     setContactsLoading(true);
     try {
-      const perm = await Contacts.requestPermissionsAsync();
-      if (perm.status !== 'granted') {
-        // Denied for good — the OS won't prompt again, so deep-link to Settings.
-        if (perm.canAskAgain === false) {
-          Alert.alert(
-            'Contacts access is off',
-            'Stalkr is blocked from reading your contacts. Turn it on in Settings, or add the watcher manually.',
-            [
-              { text: 'Add manually', style: 'cancel', onPress: () => setManualOpen(true) },
-              { text: 'Open Settings', onPress: () => Linking.openSettings() },
-            ],
-          );
-        } else {
-          Alert.alert('Contacts access needed', 'Allow contacts to pick from your phone, or add the watcher manually.');
-          setManualOpen(true);
-        }
+      // All expo-contacts access goes through one service. The previous inline
+      // call used the deprecated 'expo-contacts' export, which throws
+      // unconditionally in 56.x — see services/deviceContacts.ts.
+      const result = await loadDeviceContacts();
+
+      if (result.ok) {
+        setPhoneContacts(result.contacts);
+        setContactSearch('');
+        setContactsOpen(true);
         return;
       }
-      const { data } = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails],
-      });
-      const cleaned = cleanDeviceContacts(data as any);
-      setPhoneContacts(cleaned);
-      setContactSearch('');
-      setContactsOpen(true);
-      // Granted, but nothing came back — usually iOS "Limited" access with no
-      // contacts selected. Point the user to fix it rather than show a blank list.
-      if (cleaned.length === 0) {
-        Alert.alert(
-          'No contacts available',
-          'No contacts were shared with Stalkr. If you chose "Limited Access", tap "Open Settings" to allow more, or add the watcher manually.',
-          [
-            { text: 'Add manually', style: 'cancel', onPress: () => setManualOpen(true) },
-            { text: 'Open Settings', onPress: () => Linking.openSettings() },
-          ],
-        );
+
+      // Every failure names its actual cause and offers the matching recovery.
+      // A generic "something went wrong" hid a library deprecation for a whole
+      // release, so it is no longer an option here.
+      if (__DEV__ && result.reason === 'error') {
+        console.warn('[contacts] load failed:', result.detail);
       }
-    } catch (e) {
-      Alert.alert('Could not load contacts', 'Something went wrong reading your contacts. Add the watcher manually instead.');
-      setManualOpen(true);
+
+      const buttons =
+        needsSettings(result)
+          ? [
+              { text: 'Add manually', style: 'cancel' as const, onPress: () => setManualOpen(true) },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          : [{ text: 'Add manually', onPress: () => setManualOpen(true) }];
+
+      const title =
+        result.reason === 'blocked' ? 'Contacts access is off'
+        : result.reason === 'denied' ? 'Contacts access needed'
+        : result.reason === 'limited_or_empty' ? 'No contacts available'
+        : result.reason === 'module_unavailable' ? 'Contacts unavailable'
+        : 'Could not read contacts';
+
+      Alert.alert(title, result.message, buttons);
+      if (!needsSettings(result)) setManualOpen(true);
     } finally {
       setContactsLoading(false);
     }

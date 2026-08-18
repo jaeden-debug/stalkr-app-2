@@ -3,6 +3,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -13,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as Contacts from 'expo-contacts';
+import { loadDeviceContacts, needsSettings } from '@/services/deviceContacts';
 import { cleanDeviceContacts } from '@/utils/contacts';
 import { requireFeature } from '@/utils/paywall';
 import { Ionicons } from '@expo/vector-icons';
@@ -66,20 +67,45 @@ export default function EmergencyContactsScreen() {
     if (pickerOpen) { setPickerOpen(false); return; }
     setPickerLoading(true);
     try {
-      const { status } = await Contacts.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Contacts access', 'Allow contacts access in Settings to pick from your phone, or enter the contact manually.');
+      const result = await loadDeviceContacts();
+
+      if (result.ok) {
+        // Emergency contacts must be phone numbers — SOS texts them.
+        const phones = result.contacts
+          .filter((c) => !c.isEmail)
+          .map((c) => ({ id: c.id, name: c.name, phone: c.value }));
+
+        if (phones.length === 0) {
+          Alert.alert(
+            'No phone numbers found',
+            'Your shared contacts have no phone numbers. Emergency contacts need one — enter it manually instead.',
+          );
+          return;
+        }
+        setPhoneContacts(phones);
+        setSearch('');
+        setPickerOpen(true);
         return;
       }
-      const { data } = await Contacts.getContactsAsync({ fields: [Contacts.Fields.PhoneNumbers] });
-      const cleaned = cleanDeviceContacts(data as any)
-        .filter((c) => !c.isEmail) // emergency contacts must be a phone number (SOS texts)
-        .map((c) => ({ id: c.id, name: c.name, phone: c.value }));
-      setPhoneContacts(cleaned);
-      setSearch('');
-      setPickerOpen(true);
-    } catch {
-      Alert.alert('Could not load contacts', 'Enter the contact manually instead.');
+
+      if (__DEV__ && result.reason === 'error') {
+        console.warn('[contacts] load failed:', result.detail);
+      }
+
+      Alert.alert(
+        result.reason === 'blocked' ? 'Contacts access is off'
+          : result.reason === 'denied' ? 'Contacts access needed'
+          : result.reason === 'limited_or_empty' ? 'No contacts available'
+          : result.reason === 'module_unavailable' ? 'Contacts unavailable'
+          : 'Could not read contacts',
+        result.message,
+        needsSettings(result)
+          ? [
+              { text: 'Enter manually', style: 'cancel' as const },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          : [{ text: 'Enter manually' }],
+      );
     } finally {
       setPickerLoading(false);
     }

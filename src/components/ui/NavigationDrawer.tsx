@@ -32,6 +32,7 @@ import {
   Dimensions,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   SafeAreaView,
@@ -43,7 +44,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import * as Contacts from 'expo-contacts';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useBillingStore } from '@/store/useBillingStore';
@@ -56,6 +56,7 @@ import { useNotifCenterStore } from '@/store/useNotifCenterStore';
 import { useGoDark } from '@/hooks/useGoDark';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { resolvePresence } from '@/utils/presence';
+import { loadDeviceContacts, needsSettings } from '@/services/deviceContacts';
 import { buildWatchUrl } from '@/services/sessions';
 import { shareWithLink } from '@/utils/contactActions';
 import { requireFeature, requireLimit } from '@/utils/paywall';
@@ -369,29 +370,45 @@ export const NavigationDrawer: React.FC = () => {
     syncInFlight.current = true;
     Keyboard.dismiss();
     try {
-      const { status } = await Contacts.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('PERMISSION DENIED', 'Cannot access your contacts list.');
-        return;
-      }
-      const { data } = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails],
-      });
-      const cleaned: PickedContact[] = data
-        .filter((c) => c.name || c.phoneNumbers?.length || c.emails?.length)
-        .map((c, i) => ({
-          ...c,
-          id: String((c as any).id ?? (c as any).lookupKey ?? c.name ?? i),
-        }))
-        .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+      // Was calling the deprecated 'expo-contacts' export, which throws in 56.x.
+      // There was also no catch here, so the throw became an unhandled rejection
+      // and the picker silently never opened. See services/deviceContacts.ts.
+      const result = await loadDeviceContacts();
 
-      if (cleaned.length === 0) {
-        Alert.alert('NO CONTACTS', 'No contacts were found on this device.');
+      if (result.ok) {
+        setAllContacts(
+          result.contacts.map((c) => ({
+            id: c.id,
+            name: c.name,
+            value: c.value,
+            isEmail: c.isEmail,
+            channels: c.channels,
+            selected: c.selected,
+          })),
+        );
+        setContactSearch('');
+        setShowContactPicker(true);
         return;
       }
-      setAllContacts(cleaned);
-      setContactSearch('');
-      setShowContactPicker(true);
+
+      if (__DEV__ && result.reason === 'error') {
+        console.warn('[contacts] load failed:', result.detail);
+      }
+
+      Alert.alert(
+        result.reason === 'blocked' ? 'CONTACTS ACCESS OFF'
+          : result.reason === 'denied' ? 'PERMISSION NEEDED'
+          : result.reason === 'limited_or_empty' ? 'NO CONTACTS SHARED'
+          : result.reason === 'module_unavailable' ? 'CONTACTS UNAVAILABLE'
+          : 'COULD NOT READ CONTACTS',
+        result.message,
+        needsSettings(result)
+          ? [
+              { text: 'Cancel', style: 'cancel' as const },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          : [{ text: 'OK' }],
+      );
     } finally {
       syncInFlight.current = false;
     }
