@@ -101,8 +101,17 @@ export default function WatchPage() {
   // ── Init Google Maps ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!session || typeof window === 'undefined') return;
-    // Load Google Maps JS API lazily (key via env)
-    const GMAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY ?? '';
+    // Maps JavaScript API — a BROWSER key, which is a different restriction
+    // class from the native SDK keys. This used to read the ANDROID key, which
+    // only worked because that key was unrestricted; the moment it gets a
+    // package+SHA-1 restriction (as it should) this page's map goes blank.
+    //
+    // A browser key can only be locked down by HTTP referrer, so restrict it to
+    // the watch domain and to the Maps JavaScript API alone.
+    const GMAPS_KEY =
+      process.env.EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY ??
+      process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ??
+      '';
     if (!document.querySelector('#gmaps-script')) {
       const script = document.createElement('script');
       script.id = 'gmaps-script';
