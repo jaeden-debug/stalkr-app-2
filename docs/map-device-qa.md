@@ -174,3 +174,66 @@ Include: platform + OS version, device model, which check number, whether the
 marker was blank vs. absent vs. present-but-wrong, and the exact action
 sequence. For blanking, note whether the invisible marker was still tappable —
 that distinguishes a rasterisation failure from an unmount.
+
+---
+
+## Responsive / device-fit checklist
+
+Added after the responsive pass. Everything below was reasoned about
+arithmetically from the declared styles — **none of it has been rendered on a
+real screen**, because this machine has no iOS runtime and no Android SDK
+installed. Text metrics in particular are estimates, so treat these as
+predictions to confirm, not results.
+
+### Arithmetic already done
+
+Bottom overlay stack, measured from `constants/mapLayers.ts`:
+
+| Overlay | Anchored at | Occupies to |
+|---|---|---|
+| Check-in badge | 140 | ~184 |
+| SOS ring | 148 | 226 (ring is 78 tall) |
+| Overdue-journey prompt | 236 + safe-area inset | ~388 |
+
+Top: `TacticalHud` gradient occupies 0–150.
+
+Vertical budget, worst realistic case (iPhone SE, 667pt, no home indicator):
+prompt top edge lands ~279pt from the top, clear of the HUD's 150. On a 640dp
+Android with a ~24dp gesture inset it lands ~228pt from the top. Both fit.
+
+Horizontal: the prompt's three buttons total ~278pt of content against ~319pt
+available on a 375pt-wide screen and ~304pt on a 360dp screen. They fit on one
+row; `flexWrap: 'wrap'` covers the case where they do not.
+
+**Known limit:** at large accessibility text sizes the prompt card grows
+upward. Around 3x scaling it would reach the HUD. Confirm on a device with
+Larger Text turned well up.
+
+### Must confirm on hardware
+
+1. **iPhone SE (or any 375×667)** — map screen with an active journey, an armed
+   check-in, and the SOS button visible at once. Nothing overlapping, every
+   button pressable.
+2. **iPhone Pro Max** — same, plus confirm the prompt clears the home indicator.
+3. **Small Android (360dp)** with gesture navigation — confirm the prompt and
+   SOS clear the gesture bar.
+4. **Rotation / split-screen (Android)** — open the nav drawer and a sheet, then
+   change the window size. Both now read `useWindowDimensions`, so they should
+   re-snap to the new viewport rather than the launch-time one. This is the
+   specific regression the responsive pass fixed and the one most worth
+   checking.
+5. **Larger Text at maximum** — auth screens, journey sheet, overdue prompt.
+   Nothing clipped, nothing unreachable.
+6. **Keyboard** — login, register, journey sheet, zone creation. The submit
+   control must stay reachable. (Handled via `AuthScaffold` +
+   `windowSoftInputMode=adjustResize`; verify rather than assume.)
+7. **Long content** — a crew name and a destination name of 40+ characters.
+   Confirm truncation, not layout break.
+
+### Host setup required before any of this
+
+This machine has neither an iOS simulator runtime nor the Android SDK:
+
+    xcodebuild -downloadPlatform iOS        # or Xcode > Settings > Components
+
+Android: install Android Studio, then create an AVD.
