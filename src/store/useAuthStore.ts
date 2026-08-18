@@ -149,9 +149,22 @@ export const useAuthStore = create<AuthState>()(
       },
 
       deleteAccount: async () => {
+        // Release this device's push registration BEFORE the account is gone.
+        // The profile row cascades away server-side, but doing it here also
+        // stops the local token being reused by the next account to sign in.
+        const userId = get().session?.user?.id;
+        const token = get().profile?.push_token ?? null;
+        if (userId) await unregisterPushToken(userId, token).catch(() => {});
+
         const result = await authService.deleteAccount();
         if (result.success) {
           set({ session: null, profile: null, user: null, error: null });
+          // Same purge sign-out performs. Without it the deleted account's
+          // crews, markers, zones, sessions and plan survived in memory AND in
+          // AsyncStorage, so the next account to sign in on this device
+          // inherited them — the precise account-isolation failure that was
+          // fixed for sign-out and missed here.
+          try { await require('./resetUserScopedState').resetUserScopedState(); } catch {}
           return true;
         }
         set({ error: result.error ?? 'Account deletion failed' });

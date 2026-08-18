@@ -1,3 +1,4 @@
+import { LIVE_WINDOW_MS, STALE_WINDOW_MS } from './presence';
 /**
  * Time formatting utilities for outdoor/tactical context
  */
@@ -23,10 +24,19 @@ export function timeAgo(isoString: string | null | undefined): string {
  * Returns location status based on last ping time
  */
 export function getLocationStatus(lastPingAt: string | null | undefined): 'live' | 'stale' | 'offline' {
+  // Thresholds come from the presence model rather than being restated here.
+  // The same two numbers previously existed in three places (this function,
+  // MAP_CONSTANTS, and presence.ts); identical today, free to drift tomorrow,
+  // and the symptom of drift is one part of the UI calling a member live while
+  // another calls them stale.
+  //
+  // This returns the coarse badge vocabulary and does NOT model deliberate
+  // go-dark — callers that care about privacy state must use resolvePresence()
+  // instead, which distinguishes 'dark' from 'offline'.
   if (!lastPingAt) return 'offline';
   const diffMs = Date.now() - new Date(lastPingAt).getTime();
-  if (diffMs < 5 * 60 * 1000) return 'live';
-  if (diffMs < 15 * 60 * 1000) return 'stale';
+  if (diffMs < LIVE_WINDOW_MS) return 'live';
+  if (diffMs < STALE_WINDOW_MS) return 'stale';
   return 'offline';
 }
 

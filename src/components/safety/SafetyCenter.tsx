@@ -39,8 +39,20 @@ export const SafetyCenter: React.FC = () => {
     if (!activeGroupId) { Alert.alert('No active crew', 'Join or select a crew so it can be alerted if you miss a check-in.'); return; }
     const m = custom.trim() ? Math.max(1, parseInt(custom, 10) || 0) : minutes;
     if (!m) { Alert.alert('Pick an interval', 'Choose how long until your check-in is due.'); return; }
-    arm(mode, m);
-    setOpen(false);
+    // Awaited, and the sheet only closes on success. Previously this was
+    // fire-and-forget: the sheet closed regardless, so a failed arm was
+    // indistinguishable from a successful one.
+    void (async () => {
+      const armed = await arm(mode, m);
+      if (armed) {
+        setOpen(false);
+      } else {
+        Alert.alert(
+          'Could not start your safety timer',
+          'Your timer was not saved, so no one will be alerted if you miss it. Check your connection and try again.',
+        );
+      }
+    })();
   };
 
   const handleStandDown = () => {

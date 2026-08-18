@@ -10,8 +10,11 @@ export const MAP_CONSTANTS = {
     latitudeDelta: 0.01,
     longitudeDelta: 0.01,
   },
-  STALE_THRESHOLD_MS: 5 * 60 * 1000,   // 5 minutes
-  OFFLINE_THRESHOLD_MS: 15 * 60 * 1000, // 15 minutes
+  // Freshness thresholds intentionally do NOT live here. They are defined once
+  // in utils/presence.ts (LIVE_WINDOW_MS / STALE_WINDOW_MS) and everything that
+  // judges freshness reads them from there. These duplicates were dead — nothing
+  // imported them — but a dead copy of a security- and safety-relevant constant
+  // is exactly what gets picked up later and quietly diverges.
   MIN_TRAIL_DISTANCE_M: 18,
   MIN_TRAIL_TIME_MS: 90_000,
   MAX_ACCURACY_FIRST_FIX_M: 65,

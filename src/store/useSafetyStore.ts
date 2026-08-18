@@ -43,7 +43,12 @@ interface SafetyState {
 
   setCenterOpen: (v: boolean) => void;
   loadActive: (userId: string) => Promise<void>;
-  arm: (mode: SafetyMode, minutes: number, label?: string) => Promise<void>;
+  /**
+   * Returns false when the timer could NOT be persisted. A deadman switch that
+   * silently fails to arm is worse than no deadman switch, because the user
+   * walks away believing someone will come looking.
+   */
+  arm: (mode: SafetyMode, minutes: number, label?: string) => Promise<boolean>;
   confirm: () => Promise<void>;
   cancel: () => Promise<void>;
   escalate: () => Promise<void>;
@@ -86,7 +91,7 @@ export const useSafetyStore = create<SafetyState>((set, get) => ({
   arm: async (mode, minutes, label) => {
     const userId = useAuthStore.getState().user?.id;
     const groupId = useGroupStore.getState().activeGroupId;
-    if (!userId) return;
+    if (!userId) return false;
 
     await cancelScheduled(get().schedNotifId);
     await clearActiveTimers(userId);
@@ -96,11 +101,19 @@ export const useSafetyStore = create<SafetyState>((set, get) => ({
       .map((m) => m.user_id);
 
     const timer = await createCheckInTimer(userId, minutes, adminIds, groupId, label ?? null, mode);
-    if (!timer) return;
+    if (!timer) {
+      // The write failed — most likely authorization. Reporting it is the whole
+      // point: the previous behaviour returned silently, so the sheet closed
+      // and the user believed their safety timer was running when nothing had
+      // been stored at all.
+      set({ activeTimer: null, schedNotifId: null, escalating: false });
+      return false;
+    }
 
     const schedId = await scheduleReminder(mode, new Date(timer.check_in_at), label);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     set({ activeTimer: timer, schedNotifId: schedId, escalating: false });
+    return true;
   },
 
   confirm: async () => {

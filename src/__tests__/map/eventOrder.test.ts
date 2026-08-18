@@ -146,3 +146,36 @@ describe('setCrewLocation ordering', () => {
     }
   });
 });
+
+describe('the guard applies to every realtime entity, not just locations', () => {
+  // Realtime gives no ordering guarantee. Locations were protected from day
+  // one; markers and zones were not, despite carrying the same updated_at. A
+  // delayed UPDATE arriving after a newer one silently reverted an edit the
+  // user was already looking at.
+  const at = (iso: string) => ({ updated_at: iso }) as never;
+
+  it('rejects an older marker update', () => {
+    expect(isStaleUpdate(at('2026-01-01T10:05:00Z'), at('2026-01-01T10:00:00Z'))).toBe(true);
+  });
+
+  it('accepts a newer marker update', () => {
+    expect(isStaleUpdate(at('2026-01-01T10:00:00Z'), at('2026-01-01T10:05:00Z'))).toBe(false);
+  });
+
+  it('accepts an identical timestamp rather than dropping a real edit', () => {
+    // Two edits inside the same second are indistinguishable by timestamp.
+    // Dropping the second would lose a genuine change; applying it is the
+    // safer failure, since the only cost is redundant work.
+    expect(isStaleUpdate(at('2026-01-01T10:00:00Z'), at('2026-01-01T10:00:00Z'))).toBe(false);
+  });
+
+  it('accepts anything when nothing is stored yet', () => {
+    expect(isStaleUpdate(undefined, at('2026-01-01T10:00:00Z'))).toBe(false);
+  });
+
+  it('rejects an incoming row with no usable timestamp over one that has it', () => {
+    // An undateable row cannot be shown to be newer, and overwriting known-good
+    // state with unknown-age state is how a stale position becomes "current".
+    expect(isStaleUpdate(at('2026-01-01T10:00:00Z'), at('not-a-date'))).toBe(true);
+  });
+});

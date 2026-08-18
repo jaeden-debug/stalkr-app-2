@@ -25,7 +25,11 @@ export async function resetUserScopedState(): Promise<void> {
   useLocationStore.setState({
     isBroadcasting: false, groupBroadcastingStatus: {}, lastBroadcastAt: null, batteryLevel: null, crewLocations: {},
   });
-  useSessionStore.setState({ sessions: [], activeSession: null, activeJourneySession: null });
+  // watchedSessions included deliberately: journeys ANOTHER account was invited
+  // to watch would otherwise survive an account switch on this device.
+  useSessionStore.setState({
+    sessions: [], activeSession: null, activeJourneySession: null, watchedSessions: [],
+  });
   // Reset to free/non-admin; loadEntitlement() re-derives the correct values for
   // the new account immediately after this runs.
   useBillingStore.setState({ plan: 'free', isAdmin: false, entitlement: null, lastFetchedAt: null });

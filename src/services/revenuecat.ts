@@ -15,6 +15,7 @@
  *      "crew"; attach products; put both in the "default" offering.
  *   3. Set EXPO_PUBLIC_REVENUECAT_IOS_KEY in the app env.
  */
+import { Platform } from 'react-native';
 import type { SubscriptionPlan } from '@/types/database';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -33,10 +34,31 @@ export const revenueCatAvailable = () => !!Purchases;
 
 export async function configureRevenueCat(appUserId: string | null): Promise<void> {
   if (!Purchases) return;
-  // Accept either name — .env uses *_IOS_API_KEY; older docs referenced *_IOS_KEY.
+  // RevenueCat issues a SEPARATE public SDK key per store, and passing the
+  // wrong one fails to configure. This previously read the iOS key
+  // unconditionally, so on Android `apiKey` was the iOS key at best — and the
+  // Android key in .env was read by nothing at all. The practical effect was
+  // that no Android user ever saw a paywall, could purchase, or had an
+  // entitlement resolved: the SDK simply never configured.
+  //
+  // Both names are accepted per platform because .env uses *_API_KEY while
+  // older setup docs referenced *_KEY.
   const apiKey =
-    process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ?? process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY;
-  if (!apiKey) return;
+    Platform.OS === 'android'
+      ? process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY ??
+        process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY
+      : process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY ??
+        process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY;
+
+  if (!apiKey) {
+    // Silence here is how this stayed invisible. A missing key means billing is
+    // entirely non-functional on this platform, which is worth a breadcrumb
+    // even though it must never crash the app.
+    console.warn(
+      `[revenuecat] no SDK key for ${Platform.OS}; billing is disabled on this platform`,
+    );
+    return;
+  }
   try {
     if (!configured) {
       Purchases.configure({ apiKey, appUserID: appUserId ?? undefined });

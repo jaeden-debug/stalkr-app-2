@@ -478,6 +478,12 @@ export const useMapStore = create<MapState>()(
 
       upsertMarkerInStore: (marker) =>
         set((s) => {
+          // Realtime delivers no ordering guarantee, so a delayed UPDATE can
+          // arrive after a newer one and revert an edit the user already sees.
+          // Locations were already protected by this; markers and zones were
+          // not, despite carrying the same updated_at.
+          const current = s.markers.find((m) => m.id === marker.id);
+          if (isStaleUpdate(current as never, marker as never)) return {};
           const exists = s.markers.some((m) => m.id === marker.id);
           return {
             markers: exists
@@ -631,6 +637,8 @@ export const useMapStore = create<MapState>()(
 
       upsertSavedPlaceInStore: (place) =>
         set((s) => {
+          const currentPlace = s.savedPlaces.find((p) => p.id === place.id);
+          if (isStaleUpdate(currentPlace as never, place as never)) return {};
           const exists = s.savedPlaces.find((p) => p.id === place.id);
           return {
             savedPlaces: exists
