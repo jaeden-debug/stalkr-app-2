@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { MapContainer } from '@/components/map/MapContainer';
 import { SearchOverlay } from '@/components/map/SearchOverlay';
+import { SharingConsentPrompt } from '@/components/map/SharingConsentPrompt';
 import { PlaceCard } from '@/components/map/PlaceCard';
 import { SelfMarkerMenu } from '@/components/map/SelfMarkerMenu';
 import { CrewMemberMenu } from '@/components/map/CrewMemberMenu';
@@ -54,6 +55,10 @@ export default function MapScreen() {
       <JourneySummary />
       <PlaceCard />
       <SearchOverlay />
+
+      {/* One-time per-crew sharing decision. Sharing defaults to dark, so this
+          makes the transition explicit instead of silently going dark. */}
+      <SharingConsentPrompt />
 
       <SelfMarkerMenu
         visible={selectedMapUser?.type === 'self'}

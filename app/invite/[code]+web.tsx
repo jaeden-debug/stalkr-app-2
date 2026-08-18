@@ -78,13 +78,17 @@ export default function InviteWebPage() {
 
     (async () => {
       try {
-        // Fetch group name
-        const { data: groupData, error: groupErr } = await supabaseWeb
-          .from('groups')
-          .select('id, name')
-          .eq('invite_code', code.toUpperCase())
-          .eq('invite_enabled', true)
-          .single();
+        // Public invite preview via RPC.
+        //
+        // This used to select from `groups` directly, but groups_select is
+        // USING (is_group_member(id)) and this page runs as anon — so it matched
+        // nothing and EVERY invite link rendered "invalid". peek_crew_invite is
+        // SECURITY DEFINER and returns only the name and member count to a
+        // caller holding a valid code.
+        const { data: peek, error: groupErr } = await supabaseWeb
+          .rpc('peek_crew_invite', { p_code: code.toUpperCase() });
+
+        const groupData = Array.isArray(peek) ? peek[0] : peek;
 
         if (groupErr || !groupData) {
           setPhase('invalid');
@@ -92,15 +96,9 @@ export default function InviteWebPage() {
           return;
         }
 
-        // Fetch member count
-        const { count } = await supabaseWeb
-          .from('group_members')
-          .select('id', { count: 'exact', head: true })
-          .eq('group_id', groupData.id);
-
         setGroup({
           name: groupData.name,
-          memberCount: count ?? 0,
+          memberCount: Number(groupData.member_count ?? 0),
           inviteCode: code.toUpperCase(),
         });
         setPhase('found');
