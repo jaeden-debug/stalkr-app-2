@@ -119,10 +119,24 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
     if (!session) return null;
 
     // Watcher records.
+    //
+    // invite_sent is recorded AFTER delivery is attempted, not before. SMS and
+    // email invites open the device's compose sheet — the user still has to
+    // press Send, and may never do so. Writing invite_sent: true up front made
+    // the app assert that people had been told when they may not have been,
+    // which for a safety feature is the one thing it must not get wrong.
+    //
+    // In-app watchers are different: they receive a real push, so their invite
+    // genuinely is sent by us.
+    // Rows are written NOW, before any delivery attempt. Opening the SMS or
+    // mail composer backgrounds the app and suspends JS, so anything sequenced
+    // after it may not run until the user comes back — and if they never do,
+    // the watcher records would be lost entirely. A row with invite_sent:false
+    // is recoverable; a missing row is not.
     for (const w of opts.watchers) {
       await sessionService.addWatcher(session.id, {
         userId: w.userId ?? null, name: w.name, phone: w.phone ?? null,
-        email: w.email ?? null, pushToken: w.pushToken ?? null, inviteSent: true,
+        email: w.email ?? null, pushToken: w.pushToken ?? null, inviteSent: false,
       }).catch(() => {});
     }
 
@@ -132,8 +146,16 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
     const inviteMsg = `${opts.message ? opts.message + '\n\n' : ''}${travelerName} is sharing a journey${dest} with you on Stalkr. Follow live progress and get notified when they arrive safely: ${url}`;
     const phones = opts.watchers.filter((w) => w.phone).map((w) => w.phone as string);
     const emails = opts.watchers.filter((w) => !w.phone && w.email).map((w) => w.email as string);
-    if (phones.length) openSms(phones, inviteMsg).catch(() => {});
-    if (emails.length) openEmail(emails, `${travelerName}'s journey on Stalkr`, inviteMsg).catch(() => {});
+    // These resolve true only when the compose sheet actually opened. That is
+    // still weaker than "delivered" — the user has to press Send — but it is
+    // the strongest claim this path can honestly support.
+    const smsOpened = phones.length ? await openSms(phones, inviteMsg).catch(() => false) : false;
+    const emailOpened = emails.length
+      ? await openEmail(emails, `${travelerName}'s journey on Stalkr`, inviteMsg).catch(() => false)
+      : false;
+
+    if (smsOpened) sessionService.markInvitesSent(session.id, { channel: 'phone' }).catch(() => {});
+    if (emailOpened) sessionService.markInvitesSent(session.id, { channel: 'email' }).catch(() => {});
 
     // In-app watchers get a push.
     const memberWatchers = opts.watchers.filter((w) => w.pushToken && w.userId);
@@ -145,7 +167,13 @@ export const useSessionStore = create<SessionStoreState>()((set, get) => ({
         { type: 'general', sessionId: session.id },
         'default',
         memberWatchers.map((w) => w.userId as string),
-      ).catch(() => {});
+      )
+        .then(() =>
+          sessionService.markInvitesSent(session.id, {
+            userIds: memberWatchers.map((w) => w.userId as string),
+          }),
+        )
+        .catch(() => {});
     }
 
     // Activity events (only when crew-tied).

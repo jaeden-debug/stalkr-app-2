@@ -31,7 +31,7 @@ import {
 import { sendZoneNotification, sendPushNotification } from '@/services/notifications';
 import { logEvent } from '@/services/groupEvents';
 import * as Haptics from 'expo-haptics';
-import { getWatcherPushTokens } from '@/services/sessions';
+import { getWatcherPushTokens, persistSessionPosition } from '@/services/sessions';
 import { useSessionStore } from '@/store/useSessionStore';
 import { supabase } from '@/services/supabase';
 import type { SavedPlace } from '@/types/models';
@@ -519,6 +519,15 @@ export function useLocationTracker() {
                   payload: { latitude, longitude, heading: resolvedHeading, updatedAt: new Date().toISOString() },
                 });
               } catch {}
+              // Broadcast is ephemeral — it reaches only pages already open. The
+              // durable copy is what a watcher sees when they open the link
+              // cold, reconnect, or refresh.
+              persistSessionPosition(
+                journeySession.id,
+                latitude,
+                longitude,
+                Number.isFinite(resolvedHeading) ? resolvedHeading : null,
+              ).catch(() => {});
             } else if (!journeySession && broadcastChannel.current) {
               // Session ended — clean up channel
               supabase.removeChannel(broadcastChannel.current);

@@ -26,7 +26,13 @@ interface SessionInfo {
   destination_longitude: number | null;
   status: 'active' | 'arrived' | 'cancelled';
   is_active: boolean;
-  watch_token: string;
+  started_at: string;
+  arrived_at: string | null;
+  ended_at: string | null;
+  last_latitude: number | null;
+  last_longitude: number | null;
+  last_heading: number | null;
+  last_position_at: string | null;
 }
 
 interface LivePayload {
@@ -74,6 +80,19 @@ export default function WatchPage() {
       }
       const s = data[0] as SessionInfo;
       setSession(s);
+      // Render the last known position immediately. Realtime broadcast only
+      // reaches pages that are already open, so without this the map sat blank
+      // until the traveller's next GPS fix — up to a minute, or forever if
+      // their phone was backgrounded or out of signal. Someone opening this
+      // link is worried already; a blank map is the worst possible answer.
+      if (s.last_latitude != null && s.last_longitude != null) {
+        setLive({
+          latitude: s.last_latitude,
+          longitude: s.last_longitude,
+          heading: s.last_heading ?? 0,
+          updatedAt: s.last_position_at ?? s.started_at,
+        });
+      }
       if (s.status === 'arrived') setArrived(true);
       else if (s.status === 'cancelled' || !s.is_active) setCancelled(true);
     })();
@@ -89,6 +108,13 @@ export default function WatchPage() {
       })
       .on('broadcast', { event: 'arrived' }, () => {
         setArrived(true);
+      })
+      // Without this the page kept rendering the last position as though the
+      // journey were still running, and only learned it had ended if someone
+      // happened to reload — reading as "still on their way" when the truth was
+      // "they stopped sharing".
+      .on('broadcast', { event: 'ended' }, () => {
+        setCancelled(true);
       })
       .subscribe();
 

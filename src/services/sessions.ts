@@ -14,7 +14,10 @@ export async function fetchGroupSessions(groupId: string): Promise<Session[]> {
     .from('sessions')
     .select('*')
     .eq('group_id', groupId)
-    .order('started_at', { ascending: false });
+    .order('started_at', { ascending: false })
+    // Bounded: this table only grows, and the sessions tab renders the whole
+    // result. fetchMySessions already caps at 50.
+    .limit(100);
   if (error || !data) return [];
   return data as Session[];
 }
@@ -97,22 +100,106 @@ export async function joinSessionByInviteCode(
   return session as Session;
 }
 
+
+/**
+ * Tell every open watch page that a journey reached a terminal state.
+ *
+ * The watch page listens on the Realtime channel; without this it keeps
+ * rendering the last known position as though the journey were still running,
+ * and only discovers the truth if someone happens to reload the page. A
+ * watcher looking at a live-looking map of a journey that ended twenty minutes
+ * ago is the worst failure this feature has, because it reads as "still on
+ * their way" when the real answer is "they stopped sharing".
+ *
+ * Fire-and-forget by design: a watcher's channel must never be able to block
+ * or fail the traveller's own state change.
+ */
+export async function markInvitesSent(
+  sessionId: string,
+  match: { channel: 'phone' } | { channel: 'email' } | { userIds: string[] },
+): Promise<void> {
+  let q = supabase.from('session_watchers').update({ invite_sent: true }).eq('session_id', sessionId);
+  if ('userIds' in match) {
+    if (!match.userIds.length) return;
+    q = q.in('user_id', match.userIds);
+  } else if (match.channel === 'phone') {
+    q = q.not('phone', 'is', null);
+  } else {
+    q = q.is('phone', null).not('email', 'is', null);
+  }
+  await q;
+}
+
+export async function broadcastSessionEvent(
+  watchToken: string,
+  event: 'arrived' | 'ended',
+  payload: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const ch = supabase.channel(`session:${watchToken}`);
+    await ch.subscribe();
+    await ch.send({ type: 'broadcast', event, payload });
+    supabase.removeChannel(ch);
+  } catch {
+    // Best effort. The page also resolves terminal state on load via
+    // get_session_by_watch_token, so a dropped broadcast degrades to "correct
+    // on next refresh" rather than to a wrong answer.
+  }
+}
+
+/**
+ * Persist last-known position so the watch page has something to render the
+ * instant it opens, instead of a blank map until the next GPS fix.
+ */
+export async function persistSessionPosition(
+  sessionId: string,
+  latitude: number,
+  longitude: number,
+  heading: number | null,
+): Promise<void> {
+  try {
+    await supabase.rpc('update_session_position', {
+      p_session_id: sessionId,
+      p_latitude: latitude,
+      p_longitude: longitude,
+      p_heading: heading,
+    });
+  } catch {}
+}
+
 export async function endSession(sessionId: string): Promise<boolean> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('sessions')
     .update({
       is_active: false,
       status: 'cancelled',
       ended_at: new Date().toISOString(),
     } satisfies DbSessionUpdate)
-    .eq('id', sessionId);
-  return !error;
+    .eq('id', sessionId)
+    .select('watch_token')
+    .maybeSingle();
+  if (error) return false;
+  if (data?.watch_token) {
+    await broadcastSessionEvent(data.watch_token, 'ended', {
+      sessionId,
+      status: 'cancelled',
+      endedAt: new Date().toISOString(),
+    });
+  }
+  return true;
 }
 
-/** Mark session as arrived — sets status, ended_at, broadcasts to watchers. */
+/**
+ * Mark a journey arrived.
+ *
+ * The old comment here claimed this broadcast to watchers; it did not. Only the
+ * automatic arrival path in useLocationTracker broadcast, so a traveller who
+ * tapped "I've arrived" manually left every open watch page showing them still
+ * en route. It now broadcasts on every path.
+ */
 export async function markSessionArrived(sessionId: string): Promise<boolean> {
   const now = new Date().toISOString();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('sessions')
     .update({
       is_active: false,
@@ -120,8 +207,14 @@ export async function markSessionArrived(sessionId: string): Promise<boolean> {
       arrived_at: now,
       ended_at: now,
     } satisfies DbSessionUpdate)
-    .eq('id', sessionId);
-  return !error;
+    .eq('id', sessionId)
+    .select('watch_token')
+    .maybeSingle();
+  if (error) return false;
+  if (data?.watch_token) {
+    await broadcastSessionEvent(data.watch_token, 'arrived', { sessionId, arrivedAt: now });
+  }
+  return true;
 }
 
 export async function updateSession(sessionId: string, updates: DbSessionUpdate): Promise<boolean> {
