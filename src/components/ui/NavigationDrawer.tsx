@@ -55,7 +55,7 @@ import { useSafetyStore } from '@/store/useSafetyStore';
 import { useNotifCenterStore } from '@/store/useNotifCenterStore';
 import { useGoDark } from '@/hooks/useGoDark';
 import { useAnalytics } from '@/hooks/useAnalytics';
-import { getLocationStatus } from '@/utils/time';
+import { resolvePresence } from '@/utils/presence';
 import { buildWatchUrl } from '@/services/sessions';
 import { shareWithLink } from '@/utils/contactActions';
 import { requireFeature, requireLimit } from '@/utils/paywall';
@@ -198,7 +198,9 @@ export const NavigationDrawer: React.FC = () => {
   const liveCount = useMemo(
     () => groupMembers.filter((m) => {
       const loc = crewLocations[m.user_id];
-      return loc ? getLocationStatus((loc as any).updated_at) === 'live' : m.status === 'live';
+      return loc
+        ? resolvePresence({ status: (loc as any).status, lastPingAt: (loc as any).last_ping_at ?? (loc as any).updated_at }).state === 'live'
+        : m.status === 'live';
     }).length,
     [groupMembers, crewLocations],
   );

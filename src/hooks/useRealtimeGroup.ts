@@ -26,7 +26,6 @@ import { useGroupStore } from '@/store/useGroupStore';
 import { useMapStore } from '@/store/useMapStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { getCrewColor } from '@/constants/map';
-import { getLocationStatus } from '@/utils/time';
 import { fetchGroupLiveLocations } from '@/services/liveLocations';
 import { fetchGroupMarkers, isMarkerVisibleToGroup, normalizeMarker } from '@/services/markers';
 import { fetchGroupSavedPlaces, normalizeSavedPlace } from '@/services/savedPlaces';
@@ -57,9 +56,9 @@ export function mapLiveRow(row: any): MapCrewMember | null {
   if (!isValidLatitude(lat)) return rejectRow('live_location', `invalid latitude ${lat}`, row);
   if (!isValidLongitude(lng)) return rejectRow('live_location', `invalid longitude ${lng}`, row);
 
-  const explicit = row.status === 'offline' || row.status === 'paused';
-  const status = explicit ? row.status : getLocationStatus(row.last_ping_at);
-
+  // Raw status passes through untouched. Deriving freshness here duplicated the
+  // policy and, worse, collapsed 'paused' (deliberately dark) into 'offline'
+  // (we lost them). resolvePresence() is now the single decision point.
   return {
     user_id: row.user_id,
     group_id: row.group_id,
@@ -71,7 +70,7 @@ export function mapLiveRow(row: any): MapCrewMember | null {
     speed: toFiniteNumber(row.speed) ?? 0,
     accuracy: toFiniteNumber(row.accuracy) ?? 0,
     battery_level: toFiniteNumber(row.battery_level),
-    status: status as any,
+    status: (row.status ?? null) as any,
     sharing_mode: row.sharing_mode,
     updated_at: row.updated_at,
     last_ping_at: row.last_ping_at,

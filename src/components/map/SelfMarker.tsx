@@ -26,6 +26,7 @@ import { useLocationStore } from '@/store/useLocationStore';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useSelfPoseStore } from '@/store/useSelfPoseStore';
+import { isDarkForCrew } from '@/utils/broadcast';
 import { SELF_PUCK_IMAGE } from '@/constants/mapMarkerImages';
 import { MAP_Z_MARKER, MAP_Z_SHAPE } from '@/constants/mapLayers';
 import { SelfSelectionPin } from './SelfSelectionPin';
@@ -54,13 +55,12 @@ export const SelfMarker: React.FC = memo(() => {
 
   const heading = useSelfPoseStore((s) => s.heading);
 
-  // Go Dark is per-crew; fall back to the global flag when this crew has no
-  // explicit override yet.
+  // Darkness is derived from the SAME expression useLocationTracker gates
+  // broadcasting on. It previously fell back to the global isBroadcasting flag
+  // when the per-crew entry was unset, which let the marker render dark while
+  // the tracker was still broadcasting. See utils/broadcast.ts.
   const activeGroupId = useGroupStore((s) => s.activeGroupId);
-  const isDark = useLocationStore((s) => {
-    const perCrew = activeGroupId ? s.groupBroadcastingStatus[activeGroupId] : undefined;
-    return perCrew !== undefined ? !perCrew : !s.isBroadcasting;
-  });
+  const isDark = useLocationStore((s) => isDarkForCrew(s.groupBroadcastingStatus, activeGroupId));
 
   if (latitude == null || longitude == null || !userId) return null;
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;

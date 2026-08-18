@@ -6,11 +6,12 @@ import { Clipboard, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 
 import { Sheet } from '@/components/ui/Sheet';
 import { Toggle } from '@/components/ui/Toggle';
 import { MemberCard } from './MemberCard';
+import { PresenceBanner } from './PresenceBanner';
+import { resolvePresence } from '@/utils/presence';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useMapStore } from '@/store/useMapStore';
 import { useToast } from '@/components/ui/Toast';
 import { getDistance } from '@/utils/distance';
-import { getLocationStatus } from '@/utils/time';
 import { getCrewColor } from '@/constants/map';
 import { callNumber, openSms } from '@/utils/contactActions';
 
@@ -39,13 +40,16 @@ export const CrewMemberMenu: React.FC<CrewMemberMenuProps> = memo(({ visible, on
   const initials =
     member?.initials_override || member?.profile?.initials || displayName.slice(0, 2).toUpperCase();
 
-  const explicitOffline = location?.status === 'offline' || location?.status === 'paused';
-  const status: 'live' | 'stale' | 'offline' = !location
-    ? 'offline'
-    : explicitOffline
-    ? 'offline'
-    : (getLocationStatus(location.last_ping_at) as 'live' | 'stale' | 'offline');
-  const isDark = status === 'offline';
+  // Single authoritative freshness policy — this drawer previously collapsed
+  // "went dark", "signal aged out" and "no data at all" into one 'offline'
+  // value, so it could not tell the user which had happened.
+  const presence = resolvePresence({
+    status: location?.status,
+    lastPingAt: location?.last_ping_at,
+  });
+  const isDark = presence.state === 'dark';
+  const status: 'live' | 'stale' | 'offline' =
+    presence.state === 'live' ? 'live' : presence.state === 'stale' ? 'stale' : 'offline';
 
   const coords = location ? { latitude: location.latitude, longitude: location.longitude } : null;
   const distance = myLocation && coords
@@ -64,6 +68,7 @@ export const CrewMemberMenu: React.FC<CrewMemberMenuProps> = memo(({ visible, on
   return (
     <Sheet visible={visible} onClose={onClose} snapHeight={560}>
       <ScrollView showsVerticalScrollIndicator={false}>
+        <PresenceBanner presence={presence} name={displayName} coords={coords} />
         <MemberCard
           name={displayName}
           avatarUri={member?.avatar_url_override || member?.profile?.avatar_url}
@@ -73,7 +78,7 @@ export const CrewMemberMenu: React.FC<CrewMemberMenuProps> = memo(({ visible, on
           isDark={isDark}
           status={status}
           coords={coords}
-          heading={location?.heading ?? undefined}
+          heading={presence.isDirectional ? (location?.heading ?? undefined) : undefined}
           speed={location?.speed}
           battery={location?.battery_level ?? null}
           accuracy={location?.accuracy}

@@ -21,11 +21,12 @@ import { Alert } from 'react-native';
 import { useLocationStore } from '@/store/useLocationStore';
 import { useGroupStore } from '@/store/useGroupStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { isDarkForCrew } from '@/utils/broadcast';
 import { logEvent } from '@/services/groupEvents';
 import { sendLocalNotification } from '@/services/notifications';
 
 export function useGoDark() {
-  const isBroadcasting = useLocationStore((s) => s.isBroadcasting);
+  const groupBroadcastingStatus = useLocationStore((s) => s.groupBroadcastingStatus);
   const setIsBroadcasting = useLocationStore((s) => s.setIsBroadcasting);
   const setGroupBroadcasting = useLocationStore((s) => s.setGroupBroadcasting);
 
@@ -43,7 +44,11 @@ export function useGoDark() {
   // (The owner turns enforcement off in crew settings, not via go-dark.)
   const isEnforced = activeGroup?.tracking_mode === 'enforced';
 
-  const isDark = !isBroadcasting;
+  // Per-crew, matching what the tracker actually does. Reading the global flag
+  // here meant going dark in crew A made crew B *look* dark too, while B kept
+  // broadcasting.
+  const isDark = isDarkForCrew(groupBroadcastingStatus, activeGroupId);
+  const isBroadcasting = !isDark;
 
   const toggle = useCallback(async () => {
     if (!activeGroupId) {

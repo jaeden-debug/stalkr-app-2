@@ -21,7 +21,7 @@ import type { MapCrewMember } from '@/types/models';
 import { getCrewColor } from '@/constants/map';
 import { getCrewConeImage } from '@/constants/mapMarkerImages';
 import { MAP_Z_MARKER } from '@/constants/mapLayers';
-import { getLocationStatus } from '@/utils/time';
+import { PRESENCE_COLOR, resolvePresence } from '@/utils/presence';
 import { useMarkerSnapshot } from '@/hooks/useMarkerSnapshot';
 
 interface CrewMarkerProps {
@@ -47,17 +47,21 @@ export const CrewMarker: React.FC<CrewMarkerProps> = memo(
 
     const color = getCrewColor(location.user_id);
 
-    // A member who has gone dark is flagged offline/paused on their row — grey
-    // them out at their last known position rather than waiting for the ping to
-    // age out.
-    const explicitOffline = location.status === 'offline' || location.status === 'paused';
-    const status = explicitOffline ? 'offline' : getLocationStatus(location.last_ping_at);
-    const statusColor = status === 'live' ? '#22c55e' : status === 'stale' ? '#f59e0b' : '#6b7280';
+    // Single authoritative freshness policy — see utils/presence.ts. A member
+    // who went dark stays VISIBLE at their last known position, greyed, and is
+    // never conflated with a member whose ping simply aged out.
+    const presence = resolvePresence({
+      status: location.status,
+      lastPingAt: location.last_ping_at,
+    });
+    const status = presence.state;
+    const statusColor = PRESENCE_COLOR[status];
 
-    // heading === null means the member's device reported no compass fix. Show
-    // no cone rather than a cone pointing north.
+    // Direction is only drawn while presence says the heading may be trusted.
+    // A dark member keeps their last known POSITION but loses the cone — a cone
+    // after someone stops sharing asserts a facing direction we no longer have.
     const hasHeading =
-      status !== 'offline' && location.heading != null && Number.isFinite(location.heading);
+      presence.isDirectional && location.heading != null && Number.isFinite(location.heading);
 
     // Badge artwork depends on identity and status only — never on coordinates,
     // since moving a marker does not change its bitmap.
@@ -66,6 +70,9 @@ export const CrewMarker: React.FC<CrewMarkerProps> = memo(
       initials,
       avatarUrl ?? '',
     ]);
+    // Dark and no-signal members are dimmed so a glance separates them from live
+    // crew without hiding where they were last seen.
+    const dimmed = status === 'dark' || status === 'unknown';
 
     const coordinate = { latitude: location.latitude, longitude: location.longitude };
 
@@ -99,6 +106,7 @@ export const CrewMarker: React.FC<CrewMarkerProps> = memo(
               style={[
                 styles.marker,
                 { borderColor: statusColor, backgroundColor: `${color}22` },
+                dimmed && styles.markerDimmed,
               ]}
             >
               {avatarUrl ? (
@@ -107,8 +115,9 @@ export const CrewMarker: React.FC<CrewMarkerProps> = memo(
                 <Text style={[styles.initials, { color }]}>{initials}</Text>
               )}
             </View>
-            {status === 'stale' && <View style={[styles.statusDot, { backgroundColor: '#f59e0b' }]} />}
-            {status === 'offline' && <View style={[styles.statusDot, { backgroundColor: '#6b7280' }]} />}
+            {status !== 'live' && (
+              <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+            )}
           </View>
         </Marker>
       </>
@@ -147,6 +156,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   avatar: { width: '100%', height: '100%' },
+  markerDimmed: { opacity: 0.55 },
   initials: {
     fontSize: 13,
     fontWeight: '700',

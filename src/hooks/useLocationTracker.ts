@@ -16,7 +16,8 @@ import { useLocationStore } from '@/store/useLocationStore';
 import { useMapStore } from '@/store/useMapStore';
 import { useSelfPoseStore } from '@/store/useSelfPoseStore';
 import { createHeadingSmoother, shortestAngleDelta } from '@/utils/heading';
-import { upsertLiveLocation, setLocationOffline } from '@/services/liveLocations';
+import { isBroadcastingToCrew } from '@/utils/broadcast';
+import { upsertLiveLocation, setLocationPaused } from '@/services/liveLocations';
 import { isInsideCircle } from '@/utils/distance';
 import { isInsidePolygon } from '@/utils/polygon';
 import { isQuietHours } from '@/utils/time';
@@ -315,12 +316,14 @@ export function useLocationTracker() {
             let wroteAny = false;
 
             for (const g of groups) {
-              const liveForGroup = statusMap[g.id] !== false; // default true
+              const liveForGroup = isBroadcastingToCrew(statusMap, g.id);
               if (!liveForGroup) {
                 // Mark offline once when a crew is dark (keeps last known position).
                 if (!offlineMarkedGroups.current.has(g.id)) {
                   offlineMarkedGroups.current.add(g.id);
-                  setLocationOffline(g.id, userId).catch(() => {});
+                  // 'paused' = deliberate go-dark. Writing 'offline' here made a
+                  // private user indistinguishable from a user we had lost.
+                  setLocationPaused(g.id, userId).catch(() => {});
                 }
                 continue;
               }
@@ -352,7 +355,7 @@ export function useLocationTracker() {
 
             // Zone checks run against the active crew's zones (local awareness).
             const activeGid = useGroupStore.getState().activeGroupId;
-            if (activeGid && statusMap[activeGid] !== false) {
+            if (activeGid && isBroadcastingToCrew(statusMap, activeGid)) {
               await checkZones(latitude, longitude, userId, activeGid);
             }
           }
@@ -486,7 +489,7 @@ export function useLocationTracker() {
       const userId = sessionUserId;
       const groupId = activeGroupId;
       if (userId && groupId) {
-        setLocationOffline(groupId, userId).catch(() => {});
+        setLocationPaused(groupId, userId).catch(() => {});
       }
     }
   }, [isBroadcasting, sessionUserId, activeGroupId]);

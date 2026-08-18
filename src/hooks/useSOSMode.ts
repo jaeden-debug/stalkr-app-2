@@ -15,6 +15,32 @@ import { supabase } from '@/services/supabase';
 import { FEATURES } from '@/config/features';
 import { track } from '@/services/analytics';
 
+/**
+ * Honest outcome of an SOS activation.
+ *
+ * These three were previously conflated: the UI said "your location has been
+ * shared with your crew" regardless of whether the event reached the database
+ * or any push left the device. They are now reported separately so the button
+ * can tell the user what actually happened.
+ */
+export interface SosActivationResult {
+  /** SOS state is live on THIS device. Always true once triggerSOS runs. */
+  initiated: boolean;
+  /** The group_events row was written — the crew will see it on next sync. */
+  persisted: boolean;
+  /** The push request was accepted by the send endpoint (not delivery proof). */
+  dispatched: boolean;
+  /** How many crew push tokens the dispatch covered. */
+  recipients: number;
+  /** True when a GPS fix was attached. SOS still fires without one. */
+  hasLocation: boolean;
+  /**
+   * True when the SMS composer was opened for emergency contacts. This requires
+   * the user to press Send — it is NOT automatic delivery.
+   */
+  smsComposerOpened: boolean;
+}
+
 export function useSOSMode() {
   const userId = useAuthStore((s) => s.user?.id);
   const profile = useAuthStore((s) => s.profile);
@@ -23,8 +49,18 @@ export function useSOSMode() {
   const myLocation = useMapStore((s) => s.myLocation);
   const clearSOS = useMapStore((s) => s.clearSOSMode);
 
-  const triggerSOS = useCallback(async () => {
-    if (!FEATURES.SOS_MODE || !userId) return;
+  const triggerSOS = useCallback(async (): Promise<SosActivationResult> => {
+    const result: SosActivationResult = {
+      initiated: false, persisted: false, dispatched: false,
+      recipients: 0, hasLocation: false, smsComposerOpened: false,
+    };
+    if (!FEATURES.SOS_MODE || !userId) return result;
+
+    result.initiated = true;
+    // Mark SOS active in the shared store. This was never set before, so any
+    // other surface reading useMapStore.sosActive believed SOS was never on.
+    useMapStore.getState().triggerSOSMode();
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     track({ name: 'sos_triggered' });
 
@@ -33,10 +69,11 @@ export function useSOSMode() {
       : null;
 
     const userName = profile?.nickname || profile?.display_name || 'A crew member';
+    result.hasLocation = coords !== null;
 
     // Log group event
     if (activeGroupId) {
-      await logEvent(
+      result.persisted = await logEvent(
         activeGroupId,
         userId,
         'sos_triggered',
@@ -53,8 +90,12 @@ export function useSOSMode() {
     const tokens = crewMembers.map((m) => m.profile!.push_token as string);
     const userIds = crewMembers.map((m) => m.user_id);
 
-    if (tokens.length > 0 && coords) {
-      await sendSOSNotification(tokens, userName, coords, userIds);
+    // Dispatch regardless of whether a GPS fix exists — an SOS with no fix is
+    // still an SOS, and previously it silently notified nobody.
+    if (tokens.length > 0) {
+      const dispatch = await sendSOSNotification(tokens, userName, coords, userIds);
+      result.dispatched = dispatch.dispatched;
+      result.recipients = dispatch.recipients;
     }
 
     // Text emergency contacts a pre-filled SOS message with a location link.
@@ -72,16 +113,24 @@ export function useSOSMode() {
           contacts.map((c) => c.phone_number),
           `🆘 SOS from ${userName}. I need help.${loc}${medLine}`,
         );
+        // openSms only OPENS the composer — the user must still press send.
+        result.smsComposerOpened = true;
       }
     } catch {}
 
-    // Local confirmation
+    // Local confirmation — worded from what actually happened, not from intent.
     await sendLocalNotification(
       '🆘 SOS Activated',
-      'Your location has been shared with your crew.',
+      result.dispatched
+        ? `Alert sent to ${result.recipients} crew ${result.recipients === 1 ? 'device' : 'devices'}.`
+        : result.persisted
+          ? 'Recorded for your crew. Push alert could not be confirmed.'
+          : 'Active on this device. Could not reach the server.',
       { type: 'sos' },
       'sos',
     );
+
+    return result;
   }, [userId, profile, activeGroupId, groupMembers, myLocation]);
 
   const dismissSOS = useCallback(async () => {

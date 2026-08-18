@@ -135,6 +135,24 @@ export async function registerPushToken(userId: string): Promise<string | null> 
  * @param channelId       Android channel
  * @param recipientUserIds Supabase user IDs parallel to tokens (required for server-side pref filtering)
  */
+/**
+ * Outcome of a push dispatch attempt.
+ *
+ * This used to return void and swallow every error, so callers could not tell
+ * "delivered" from "silently failed". SOS in particular told the user "your
+ * crew has been alerted" whether or not anything left the device.
+ *
+ * `dispatched` means the send endpoint ACCEPTED the request — it is not
+ * delivery confirmation, which push transports cannot give us synchronously.
+ */
+export interface PushDispatchResult {
+  dispatched: boolean;
+  /** Number of valid Expo tokens the request covered. */
+  recipients: number;
+  /** Present when dispatch failed or was skipped. */
+  reason?: 'no_recipients' | 'network_error' | 'server_error';
+}
+
 export async function sendPushNotification(
   tokens: string[],
   title: string,
@@ -144,16 +162,16 @@ export async function sendPushNotification(
   recipientUserIds?: string[],
   groupId?: string,
   fromUserId?: string,
-): Promise<void> {
+): Promise<PushDispatchResult> {
   const valid = tokens.filter((t) => t?.startsWith('ExponentPushToken'));
-  if (valid.length === 0) return;
+  if (valid.length === 0) return { dispatched: false, recipients: 0, reason: 'no_recipients' };
 
   // Get the current session's access token for the Edge Function
   const { data: sessionData } = await supabase.auth.getSession();
   const accessToken = sessionData.session?.access_token;
 
   try {
-    await fetch(SEND_PUSH_FUNCTION_URL, {
+    const res = await fetch(SEND_PUSH_FUNCTION_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -171,8 +189,14 @@ export async function sendPushNotification(
         fromUserId,
       }),
     });
+    if (!res.ok) {
+      console.error('[notifications] Push send rejected:', res.status);
+      return { dispatched: false, recipients: valid.length, reason: 'server_error' };
+    }
+    return { dispatched: true, recipients: valid.length };
   } catch (err) {
     console.error('[notifications] Push send error:', err);
+    return { dispatched: false, recipients: valid.length, reason: 'network_error' };
   }
 }
 
@@ -205,14 +229,21 @@ export async function sendZoneNotification(
 export async function sendSOSNotification(
   tokens: string[],
   userName: string,
-  coords: { latitude: number; longitude: number },
+  coords: { latitude: number; longitude: number } | null,
   recipientUserIds?: string[],
-): Promise<void> {
-  await sendPushNotification(
+): Promise<PushDispatchResult> {
+  // An SOS with no GPS fix must STILL alert the crew. Previously the caller
+  // skipped the push entirely when coords were missing, so an SOS indoors or
+  // before first fix notified nobody while the UI claimed success.
+  return sendPushNotification(
     tokens,
     `🆘 SOS — ${userName}`,
-    `${userName} activated SOS. Tap to view their location.`,
-    { type: 'sos', latitude: coords.latitude, longitude: coords.longitude },
+    coords
+      ? `${userName} activated SOS. Tap to view their location.`
+      : `${userName} activated SOS. No location fix available.`,
+    coords
+      ? { type: 'sos', latitude: coords.latitude, longitude: coords.longitude }
+      : { type: 'sos' },
     'sos',
     recipientUserIds,
   );
