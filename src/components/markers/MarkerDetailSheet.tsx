@@ -2,7 +2,7 @@
  * MarkerDetailSheet — shows details for a selected tactical marker.
  * Owners can rename, drag-to-move, and delete.
  */
-import React, { memo, useState, useEffect } from 'react';
+import React, { memo, useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   ScrollView,
@@ -22,6 +22,13 @@ import { useBillingStore } from '@/store/useBillingStore';
 import { useToast } from '@/components/ui/Toast';
 import { getMarkerConfig } from '@/constants/markerTypes';
 import { updateMarker, fetchMarkerPhotos, uploadMarkerPhoto } from '@/services/markers';
+import {
+  DEFAULT_ARRIVAL_RADIUS_M,
+  MAX_ARRIVAL_RADIUS_M,
+  MIN_ARRIVAL_RADIUS_M,
+} from '@/services/markerArrival';
+import { Toggle } from '@/components/ui/Toggle';
+import { formatDistanceBoth } from '@/utils/distance';
 import { logEvent } from '@/services/groupEvents';
 import { timeAgo } from '@/utils/time';
 
@@ -45,6 +52,25 @@ export const MarkerDetailSheet: React.FC<MarkerDetailSheetProps> = memo(
     const [title, setTitle] = useState('');
     const [renaming, setRenaming] = useState(false);
     const [saving, setSaving] = useState(false);
+
+    // Arrival state is read from the marker so it stays correct when another
+    // device changes it; local state exists only to keep the toggle responsive.
+    const arrivalOn = !!marker?.notify_on_arrival && !!marker?.arrival_radius_m;
+    const radius = marker?.arrival_radius_m ?? DEFAULT_ARRIVAL_RADIUS_M;
+
+    const saveArrival = useCallback(
+      async (enabled: boolean, radiusM: number) => {
+        if (!marker) return;
+        const next = {
+          notify_on_arrival: enabled,
+          // Keep the radius when switching off, so re-enabling remembers it.
+          arrival_radius_m: enabled ? radiusM : marker.arrival_radius_m ?? radiusM,
+        };
+        updateMarkerInStore(marker.id, next);
+        await updateMarker(marker.id, next as never);
+      },
+      [marker, updateMarkerInStore],
+    );
 
     useEffect(() => {
       if (marker) setTitle(marker.title);
@@ -122,6 +148,44 @@ export const MarkerDetailSheet: React.FC<MarkerDetailSheetProps> = memo(
             upload={(uri) => uploadMarkerPhoto(marker.id, marker.group_id, userId!, uri).then((p) => (p ? { id: p.id, url: p.url } : null))}
           />
 
+          {/* ── Arrival alerts ──
+              Nests with zone alerts: walking onto the property fires the ZONE
+              notification, then reaching this pin fires this one. */}
+          <View style={styles.divider} />
+          <View style={styles.arrivalBlock}>
+            <View style={styles.arrivalRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.arrivalLabel}>Arrival alerts</Text>
+                <Text style={styles.arrivalSub}>
+                  {arrivalOn
+                    ? `Crew is told when someone comes within ${formatDistanceBoth(radius)}`
+                    : 'Tell the crew when someone reaches this marker'}
+                </Text>
+              </View>
+              <Toggle
+                value={arrivalOn}
+                onValueChange={(v) => saveArrival(v, radius)}
+              />
+            </View>
+
+            {arrivalOn && (
+              <View style={styles.radiusRow}>
+                {[25, 50, 100, 250].filter((r) => r >= MIN_ARRIVAL_RADIUS_M && r <= MAX_ARRIVAL_RADIUS_M).map((r) => (
+                  <TouchableOpacity
+                    key={r}
+                    style={[styles.radiusChip, radius === r && styles.radiusChipOn]}
+                    onPress={() => saveArrival(true, r)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.radiusChipText, radius === r && styles.radiusChipTextOn]}>
+                      {formatDistanceBoth(r)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+
           {/* Owner actions */}
           {isOwner && (
             <>
@@ -190,6 +254,19 @@ const styles = StyleSheet.create({
   notesBox: { backgroundColor: '#0a0a0f', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: '#2a2a3a' },
   notesText: { color: '#c8c8d8', fontSize: 14, lineHeight: 20 },
 
+  arrivalBlock: { gap: 10 },
+  arrivalRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  arrivalLabel: { color: '#e8e8f0', fontSize: 14, fontWeight: '700' },
+  arrivalSub: { color: 'rgba(255,255,255,0.45)', fontSize: 11.5, marginTop: 2, lineHeight: 15 },
+  radiusRow: { flexDirection: 'row', gap: 8 },
+  radiusChip: {
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  radiusChipOn: { borderColor: 'rgba(74,222,128,0.5)', backgroundColor: 'rgba(74,222,128,0.15)' },
+  radiusChipText: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '700' },
+  radiusChipTextOn: { color: '#4ADE80' },
   divider: { height: 1, backgroundColor: '#2a2a3a', marginVertical: 4 },
 
   actionRow: {

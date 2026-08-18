@@ -120,6 +120,13 @@ export interface LiveLocation {
 
 // ─── Marker ───────────────────────────────────────────────────────────────────
 export interface Marker {
+  /**
+   * Radius in metres for arrival detection, or null when off.
+   * Small by design — a marker is a point of interest, not an area.
+   */
+  arrival_radius_m?: number | null;
+  /** Notify the crew when someone arrives within arrival_radius_m. */
+  notify_on_arrival?: boolean;
   id: string;
   group_id: string;
   session_id: string | null;

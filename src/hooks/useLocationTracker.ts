@@ -22,6 +22,7 @@ import { isInsideCircle } from '@/utils/distance';
 import { isInsidePolygon } from '@/utils/polygon';
 import { isQuietHours } from '@/utils/time';
 import { upsertPresence } from '@/services/savedPlaces';
+import { evaluateArrivals, upsertMarkerPresence } from '@/services/markerArrival';
 import { sendZoneNotification, sendPushNotification } from '@/services/notifications';
 import { logEvent } from '@/services/groupEvents';
 import * as Haptics from 'expo-haptics';
@@ -121,6 +122,8 @@ export function useLocationTracker() {
   const offlineMarkedGroups = useRef<Set<string>>(new Set());
   const lastTrailWrite = useRef<{ lat: number; lng: number; t: number } | null>(null);
   const zonePresence = useRef<Record<string, boolean>>({});
+  /** Per-marker arrival memory, mirroring zonePresence. */
+  const markerPresence = useRef<Record<string, boolean>>({});
   const zoneLastAlert = useRef<Record<string, number>>({});
   const zoneEnteredAt = useRef<Record<string, number>>({});
   const arrivedSessions = useRef<Set<string>>(new Set());
@@ -218,6 +221,72 @@ export function useLocationTracker() {
               'zone_stay',
             );
           }
+        }
+      }
+    },
+    [],
+  );
+
+  /**
+   * Arrival detection for individual markers ("Jaeden arrived at camp").
+   *
+   * Mirrors checkZones: transitions only, so the crew is notified on the change
+   * rather than on every fix while you sit there. The hysteresis and
+   * accuracy-awareness live in services/markerArrival.ts so they are testable
+   * without a device.
+   */
+  const checkMarkerArrivals = useCallback(
+    async (lat: number, lng: number, accuracy: number, userId: string, groupId: string) => {
+      const markers = useMapStore
+        .getState()
+        .markers.filter((m) => m.arrival_radius_m && m.arrival_radius_m > 0);
+      if (markers.length === 0) return;
+
+      const transitions = evaluateArrivals(
+        markers,
+        { latitude: lat, longitude: lng, accuracy },
+        markerPresence.current,
+      );
+
+      for (const t of transitions) {
+        markerPresence.current[t.markerId] = t.arrived;
+        await upsertMarkerPresence(t.markerId, groupId, userId, t.arrived);
+
+        const marker = markers.find((m) => m.id === t.markerId);
+        if (!marker?.notify_on_arrival) continue;
+
+        const name =
+          useAuthStore.getState().profile?.nickname ||
+          useAuthStore.getState().profile?.display_name ||
+          'A crew member';
+
+        // Arrival is the useful signal; departure is logged for the activity
+        // feed but does not push, to keep a walk past camp from spamming.
+        logEvent(
+          groupId,
+          userId,
+          t.arrived ? 'marker_arrival' : 'marker_departure',
+          t.arrived ? `${name} arrived at ${t.markerTitle}` : `${name} left ${t.markerTitle}`,
+          undefined,
+          { marker_id: t.markerId },
+        ).catch(() => {});
+
+        if (!t.arrived) continue;
+
+        const crew = useGroupStore
+          .getState()
+          .groupMembers.filter((m) => m.user_id !== userId && m.profile?.push_token);
+        if (crew.length > 0) {
+          await sendPushNotification(
+            crew.map((m) => m.profile!.push_token as string),
+            `${name} arrived at ${t.markerTitle}`,
+            'Tap to see where they are.',
+            { type: 'zone_crew', markerId: t.markerId },
+            'zone_crew',
+            crew.map((m) => m.user_id),
+            groupId,
+            userId,
+          );
         }
       }
     },

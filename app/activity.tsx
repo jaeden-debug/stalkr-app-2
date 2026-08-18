@@ -18,6 +18,8 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 const EVENT_UI: Partial<Record<GroupEventType, { icon: IoniconName; color: string }>> = {
   sos_triggered:           { icon: 'alert-circle', color: C.red },
+  marker_arrival:          { icon: 'flag', color: C.green },
+  marker_departure:        { icon: 'exit-outline', color: 'rgba(255,255,255,0.4)' },
   sos_cancelled:           { icon: 'checkmark-circle', color: C.green },
   deadman_triggered:       { icon: 'pulse', color: C.red },
   deadman_cancelled:       { icon: 'shield-checkmark', color: C.green },

@@ -27,7 +27,18 @@ export function normalizeMarker(row: any): Marker | null {
   if (!isValidLatitude(latitude)) return rejectRow('marker', `invalid latitude ${row.latitude}`, row);
   if (!isValidLongitude(longitude)) return rejectRow('marker', `invalid longitude ${row.longitude}`, row);
 
-  return { ...row, latitude, longitude } as Marker;
+  // Arrival fields normalise too: realtime can deliver an integer column as a
+  // string, and a string radius would fail the `> 0` guard in evaluateArrivals,
+  // silently disabling arrival alerts for that marker.
+  const arrivalRadius = toFiniteNumber(row.arrival_radius_m);
+
+  return {
+    ...row,
+    latitude,
+    longitude,
+    arrival_radius_m: arrivalRadius,
+    notify_on_arrival: row.notify_on_arrival === true,
+  } as Marker;
 }
 
 export async function fetchGroupMarkers(groupId: string): Promise<Marker[]> {

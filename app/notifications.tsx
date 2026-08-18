@@ -20,6 +20,7 @@ type Category = 'SOS' | 'Alerts' | 'Crew' | 'Zones' | 'Journeys' | 'Sessions' | 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 const CATEGORY: Record<GroupEventType, Category> = {
+  marker_arrival: 'Zones', marker_departure: 'Zones',
   sos_triggered: 'SOS', sos_cancelled: 'SOS', deadman_triggered: 'SOS', deadman_cancelled: 'SOS',
   checkin_timer_missed: 'Alerts', checkin_timer_completed: 'Alerts', member_offline: 'Alerts', member_online: 'Alerts', low_signal_alert: 'Alerts',
   member_joined: 'Crew', member_left: 'Crew', member_kicked: 'Crew', role_changed: 'Crew',
@@ -33,6 +34,8 @@ const CATEGORY: Record<GroupEventType, Category> = {
 };
 
 const UI: Partial<Record<GroupEventType, { icon: IoniconName; color: string }>> = {
+  marker_arrival: { icon: 'flag', color: C.green },
+  marker_departure: { icon: 'exit-outline', color: C.textMuted },
   sos_triggered: { icon: 'alert-circle', color: C.red }, deadman_triggered: { icon: 'pulse', color: C.red },
   sos_cancelled: { icon: 'checkmark-circle', color: C.green }, deadman_cancelled: { icon: 'shield-checkmark', color: C.green },
   checkin_timer_missed: { icon: 'warning', color: C.red }, checkin_timer_completed: { icon: 'checkmark-circle', color: C.green },

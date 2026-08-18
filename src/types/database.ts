@@ -433,6 +433,8 @@ export type GroupEventType =
   | 'sos_triggered'
   | 'sos_cancelled'
   | 'rally_point_set'
+  | 'marker_arrival'
+  | 'marker_departure'
   | 'checkin_timer_missed'
   | 'checkin_timer_completed'
   | 'deadman_triggered'
