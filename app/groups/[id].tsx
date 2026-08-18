@@ -149,8 +149,15 @@ export default function CrewSettingsScreen() {
     Alert.alert('Delete Crew', `Delete "${group.name}"? This cannot be undone.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
-        const ok = await deleteGroup(group.id);
-        if (ok) { toast.success('Crew deleted'); router.back(); } else toast.error('Failed to delete');
+        const result = await deleteGroup(group.id);
+        if (result.ok) {
+          toast.success('Crew deleted');
+          router.replace('/(tabs)/groups');
+        } else {
+          // Previously this reported success even when RLS silently blocked the
+          // delete, so the crew "disappeared" and came straight back.
+          Alert.alert('Could not delete crew', result.message);
+        }
       } },
     ]);
   };

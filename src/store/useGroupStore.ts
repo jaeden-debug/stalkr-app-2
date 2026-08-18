@@ -24,7 +24,7 @@ interface GroupState {
   createGroup: (name: string, type?: string, enforceTracking?: boolean) => Promise<Group | null>;
   joinByInviteCode: (code: string) => Promise<groupService.JoinCrewResult>;
   leaveGroup: (groupId: string) => Promise<groupService.LeaveCrewResult>;
-  deleteGroup: (groupId: string) => Promise<boolean>;
+  deleteGroup: (groupId: string) => Promise<groupService.DeleteCrewResult>;
   updateGroup: (
     groupId: string,
     updates: Partial<Pick<Group, 'name' | 'tracking_mode' | 'invite_enabled'>>,
@@ -151,8 +151,8 @@ export const useGroupStore = create<GroupState>()(
   },
 
   deleteGroup: async (groupId) => {
-    const ok = await groupService.deleteGroup(groupId);
-    if (ok) {
+    const result = await groupService.deleteCrew(groupId);
+    if (result.ok) {
       set((s) => {
         const groups = s.groups.filter((g) => g.id !== groupId);
         return {
@@ -160,8 +160,12 @@ export const useGroupStore = create<GroupState>()(
           activeGroupId: s.activeGroupId === groupId ? (groups[0]?.id ?? null) : s.activeGroupId,
         };
       });
+      // Drop the deleted crew's map data rather than leaving unauthorized
+      // markers and zones in memory.
+      const { useMapStore } = require('./useMapStore');
+      useMapStore.getState().suspendPopulation();
     }
-    return ok;
+    return result;
   },
 
   updateGroup: async (groupId, updates) => {

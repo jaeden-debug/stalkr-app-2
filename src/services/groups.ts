@@ -125,9 +125,43 @@ export async function leaveGroup(groupId: string, _userId?: string): Promise<boo
   return (await leaveCrew(groupId)).ok;
 }
 
+export type DeleteCrewResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_owner' | 'error'; message: string };
+
+/**
+ * Delete a crew, and actually verify it happened.
+ *
+ * A DELETE blocked by RLS is NOT an error in PostgREST — it simply affects
+ * zero rows. The old implementation returned `!error`, so deleting a crew you
+ * do not own reported success, showed "Crew deleted" and navigated away while
+ * the crew was still there. `.select()` makes the deleted rows come back so we
+ * can tell the difference.
+ */
+export async function deleteCrew(groupId: string): Promise<DeleteCrewResult> {
+  const { data, error } = await supabase
+    .from('groups')
+    .delete()
+    .eq('id', groupId)
+    .select('id');
+
+  if (error) {
+    console.error('[groups] delete failed:', error.message, error.code);
+    return { ok: false, reason: 'error', message: 'Could not delete the crew. Please try again.' };
+  }
+  if (!data || data.length === 0) {
+    return {
+      ok: false,
+      reason: 'not_owner',
+      message: 'Only the crew owner can delete it. Ask the owner, or leave the crew instead.',
+    };
+  }
+  return { ok: true };
+}
+
+/** @deprecated Use deleteCrew — kept so older call sites still compile. */
 export async function deleteGroup(groupId: string): Promise<boolean> {
-  const { error } = await supabase.from('groups').delete().eq('id', groupId);
-  return !error;
+  return (await deleteCrew(groupId)).ok;
 }
 
 export async function updateGroup(groupId: string, updates: DbGroupUpdate): Promise<boolean> {
