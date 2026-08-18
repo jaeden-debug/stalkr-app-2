@@ -36,7 +36,7 @@ export default function CrewSettingsScreen() {
   const router = useRouter();
   const toast = useToast();
   const {
-    groups, groupMembers, membersLoading,
+    groups, groupMembers, membersLoading, isLoading,
     loadGroupMembers, updateGroup, deleteGroup, leaveGroup, removeMember, updateMember,
   } = useGroupStore();
   const userId = useAuthStore((s) => s.user?.id);
@@ -80,7 +80,30 @@ export default function CrewSettingsScreen() {
     }
   }, [group?.id]);
 
-  if (!group) return <LoadingOverlay visible fullScreen />;
+  // A missing crew means one of two very different things. Showing a spinner
+  // for both left a removed member staring at an infinite loader with no way
+  // out — the crew was gone, so it was never going to arrive.
+  if (!group) {
+    if (isLoading || groups.length === 0) return <LoadingOverlay visible fullScreen />;
+    return (
+      <SafeAreaView style={s.root}>
+        <View style={s.goneWrap}>
+          <Ionicons name="people-outline" size={44} color="rgba(255,255,255,0.4)" />
+          <Text style={s.goneTitle}>You're not in this crew</Text>
+          <Text style={s.goneBody}>
+            You may have been removed, or the crew was deleted. Its map data has been cleared from this device.
+          </Text>
+          <TouchableOpacity
+            style={s.goneBtn}
+            onPress={() => router.replace('/(tabs)/groups')}
+            activeOpacity={0.85}
+          >
+            <Text style={s.goneBtnText}>Back to crews</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const crewPref = crewMap[group.id] ?? { muted: false, crewZoneActivity: null };
   const effectiveCrewActivity = crewPref.crewZoneActivity ?? globalCrewActivity;
@@ -396,6 +419,14 @@ const Row: React.FC<{
 );
 
 const s = StyleSheet.create({
+  goneWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
+  goneTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '800', textAlign: 'center' },
+  goneBody: { color: 'rgba(255,255,255,0.55)', fontSize: 13.5, lineHeight: 19, textAlign: 'center', marginBottom: 12 },
+  goneBtn: {
+    paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12,
+    backgroundColor: C.greenDim, borderWidth: 1, borderColor: C.greenBorder,
+  },
+  goneBtnText: { color: C.green, fontSize: 15, fontWeight: '800' },
   root: { flex: 1, backgroundColor: C.bg },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

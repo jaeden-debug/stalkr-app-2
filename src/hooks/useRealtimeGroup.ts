@@ -185,6 +185,33 @@ export function useRealtimeGroup() {
       )
       .on(
         'postgres_changes',
+        { event: '*', schema: 'public', table: 'groups', filter: `id=eq.${gid}` },
+        (payload) => {
+          // Crew POLICY changes must reach members without an app restart.
+          // Nothing subscribed to `groups` before, so turning on enforced
+          // tracking (which overrides each member's default-dark choice) only
+          // took effect for others at next launch — and turning it OFF left
+          // members broadcasting under a policy that no longer existed.
+          if (payload.eventType === 'DELETE') {
+            useGroupStore.getState().loadGroups();
+            return;
+          }
+          const row = payload.new as any;
+          if (!row?.id) return;
+          useGroupStore.setState((st) => ({
+            groups: st.groups.map((g) =>
+              g.id === row.id
+                ? { ...g, name: row.name ?? g.name,
+                    tracking_mode: row.tracking_mode ?? g.tracking_mode,
+                    invite_enabled: row.invite_enabled ?? g.invite_enabled,
+                    invite_code: row.invite_code ?? g.invite_code }
+                : g,
+            ),
+          }));
+        },
+      )
+      .on(
+        'postgres_changes',
         { event: '*', schema: 'public', table: 'group_members', filter: `group_id=eq.${gid}` },
         () => {
           // Someone joined/left/changed role — refresh the roster so new crew
